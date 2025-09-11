@@ -1,0 +1,179 @@
+# Suple Speed - Nginx Configuration
+# Add these rules to your Nginx server block
+
+# Gzip Compression
+gzip on;
+gzip_vary on;
+gzip_min_length 1024;
+gzip_proxied any;
+gzip_comp_level 6;
+gzip_types
+    text/plain
+    text/css
+    text/xml
+    text/javascript
+    text/x-component
+    text/x-cross-domain-policy
+    application/xml
+    application/xhtml+xml
+    application/rss+xml
+    application/javascript
+    application/x-javascript
+    application/json
+    application/ld+json
+    application/atom+xml
+    image/svg+xml
+    font/truetype
+    font/opentype
+    application/vnd.ms-fontobject;
+
+# Brotli Compression (if available)
+brotli on;
+brotli_comp_level 6;
+brotli_types
+    text/plain
+    text/css
+    text/xml
+    text/javascript
+    application/xml
+    application/rss+xml
+    application/javascript
+    application/json
+    application/ld+json
+    image/svg+xml
+    font/truetype
+    font/opentype
+    application/vnd.ms-fontobject;
+
+# Browser Caching
+location ~* \.(css|js)$ {
+    expires 1y;
+    add_header Cache-Control "public, max-age=31536000, immutable";
+    add_header Vary "Accept-Encoding";
+    access_log off;
+}
+
+location ~* \.(png|jpg|jpeg|gif|svg|ico|webp|avif)$ {
+    expires 1y;
+    add_header Cache-Control "public, max-age=31536000, immutable";
+    access_log off;
+}
+
+location ~* \.(woff|woff2|ttf|eot)$ {
+    expires 1y;
+    add_header Cache-Control "public, max-age=31536000, immutable";
+    add_header Access-Control-Allow-Origin "*";
+    access_log off;
+}
+
+location ~* \.(pdf|doc|docx|xls|xlsx)$ {
+    expires 1M;
+    add_header Cache-Control "public, max-age=2592000";
+    access_log off;
+}
+
+location ~* \.(html|htm)$ {
+    expires 1h;
+    add_header Cache-Control "public, max-age=3600, must-revalidate";
+}
+
+# WebP serving with fallback
+location ~* \.(jpe?g|png)$ {
+    set $webp_suffix "";
+    if ($http_accept ~* "image/webp") {
+        set $webp_suffix ".webp";
+    }
+    
+    try_files $uri$webp_suffix $uri =404;
+    
+    expires 1y;
+    add_header Cache-Control "public, max-age=31536000, immutable";
+    add_header Vary "Accept";
+}
+
+# Security Headers
+add_header X-Content-Type-Options "nosniff" always;
+add_header X-Frame-Options "SAMEORIGIN" always;
+add_header X-XSS-Protection "1; mode=block" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+# Hide server information
+server_tokens off;
+more_clear_headers 'Server';
+more_clear_headers 'X-Powered-By';
+
+# Block access to sensitive files
+location ~* \.(htaccess|htpasswd|ini|log|sh|sql|conf)$ {
+    deny all;
+}
+
+location ~* wp-config\.php {
+    deny all;
+}
+
+# Optimize file access
+location ~* \.(xml|txt)$ {
+    expires 1h;
+    add_header Cache-Control "public, max-age=3600";
+}
+
+# Enable keep-alive connections
+keepalive_timeout 65;
+keepalive_requests 100;
+
+# Optimize buffer sizes
+client_body_buffer_size 128k;
+client_max_body_size 64m;
+client_header_buffer_size 1k;
+large_client_header_buffers 4 4k;
+output_buffers 1 32k;
+postpone_output 1460;
+
+# Enable sendfile for better performance
+sendfile on;
+tcp_nopush on;
+tcp_nodelay on;
+
+# Logging optimization
+location ~* \.(css|js|png|jpg|jpeg|gif|svg|ico|webp|avif|woff|woff2|ttf|eot|pdf)$ {
+    access_log off;
+    log_not_found off;
+}
+
+# Rate limiting for API endpoints (optional)
+limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
+
+location ~* /wp-json/ {
+    limit_req zone=api burst=20 nodelay;
+}
+
+# Optimize PHP-FPM (if using)
+location ~ \.php$ {
+    try_files $uri =404;
+    fastcgi_split_path_info ^(.+\.php)(/.+)$;
+    fastcgi_pass unix:/var/run/php/php8.1-fpm.sock;  # Adjust PHP version as needed
+    fastcgi_index index.php;
+    include fastcgi_params;
+    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+    
+    # Optimize FastCGI
+    fastcgi_buffer_size 128k;
+    fastcgi_buffers 256 16k;
+    fastcgi_busy_buffers_size 256k;
+    fastcgi_temp_file_write_size 256k;
+    fastcgi_read_timeout 240;
+}
+
+# IMPORTANT NOTES:
+# 1. These rules should be added to your server block in nginx.conf
+# 2. Adjust PHP-FPM socket path according to your server setup
+# 3. Test configuration with: nginx -t
+# 4. Reload Nginx after changes: systemctl reload nginx
+# 5. Some directives may need additional modules (like brotli, more_clear_headers)
+# 6. Adjust file paths and limits according to your server specifications
+
+# For WordPress-specific optimizations, also consider:
+# - Enabling FastCGI caching
+# - Configuring proper location blocks for wp-admin
+# - Setting up rate limiting for login pages
+# - Implementing IP-based restrictions for sensitive areas

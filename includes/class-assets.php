@@ -1,0 +1,1076 @@
+<?php
+
+namespace SupleSpeed;
+
+/**
+ * Optimización de assets (CSS/JS)
+ */
+class Assets {
+    
+    /**
+     * Configuración
+     */
+    private $settings;
+    private $logger;
+    private $assets_dir;
+    private $assets_url;
+    
+    /**
+     * Grupos de assets
+     */
+    private $asset_groups = [
+        'A' => 'core_theme',    // Core WordPress y tema
+        'B' => 'plugins',       // Plugins comunes
+        'C' => 'elementor',     // Elementor específico
+        'D' => 'third_party'    // Terceros y miscelánea
+    ];
+    
+    /**
+     * Handles procesados
+     */
+    private $processed_handles = [];
+    private $excluded_handles = [];
+    private $dependency_map = [];
+    
+    public function __construct() {
+        $this->settings = get_option('suple_speed_settings', []);
+        $this->assets_dir = SUPLE_SPEED_CACHE_DIR . 'assets/';
+        $this->assets_url = str_replace(ABSPATH, home_url('/'), $this->assets_dir);
+        
+        if (function_exists('suple_speed')) {
+            $this->logger = suple_speed()->logger;
+        }
+        
+        $this->init_hooks();
+        $this->load_excluded_handles();
+    }
+    
+    /**
+     * Inicializar hooks
+     */
+    private function init_hooks() {
+        // Solo en frontend y fuera del editor de Elementor
+        if (!is_admin() && !$this->is_editor_mode()) {
+            add_action('wp_enqueue_scripts', [$this, 'optimize_scripts_styles'], 999);
+            add_action('wp_head', [$this, 'inject_critical_css'], 1);
+            add_action('wp_head', [$this, 'inject_preloads'], 2);
+            
+            // Filtros para modificar output
+            add_filter('style_loader_src', [$this, 'modify_css_src'], 10, 2);
+            add_filter('script_loader_src', [$this, 'modify_js_src'], 10, 2);
+        }
+        
+        // AJAX para escanear handles
+        add_action('wp_ajax_suple_speed_scan_handles', [$this, 'ajax_scan_handles']);
+    }
+    
+    /**
+     * Verificar si estamos en modo editor
+     */
+    private function is_editor_mode() {
+        if (function_exists('suple_speed') && 
+            suple_speed()->elementor_guard && 
+            suple_speed()->elementor_guard->should_disable_optimizations()) {
+            return true;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Cargar handles excluidos
+     */
+    private function load_excluded_handles() {
+        $this->excluded_handles = array_merge(
+            $this->settings['assets_exclude_handles'] ?? [],
+            $this->get_compatibility_excluded_handles()
+        );
+    }
+    
+    /**
+     * Obtener handles excluidos por compatibilidad
+     */
+    private function get_compatibility_excluded_handles() {
+        $excluded = [];
+        
+        if (function_exists('suple_speed') && suple_speed()->compat) {
+            $excluded = suple_speed()->compat->get_excluded_handles();
+        }
+        
+        return $excluded;
+    }
+    
+    /**
+     * Optimizar scripts y estilos
+     */
+    public function optimize_scripts_styles() {
+        global $wp_scripts, $wp_styles;
+        
+        if (!$this->should_optimize()) {
+            return;
+        }
+        
+        // Construir mapas de dependencias
+        $this->build_dependency_maps();
+        
+        // Optimizar CSS
+        if ($this->settings['assets_enabled'] && $this->settings['merge_css']) {
+            $this->optimize_css();
+        }
+        
+        // Optimizar JS
+        if ($this->settings['assets_enabled'] && $this->settings['merge_js']) {
+            $this->optimize_js();
+        }
+    }
+    
+    /**
+     * Verificar si se debe optimizar
+     */
+    private function should_optimize() {
+        // Verificar configuración
+        if (!$this->settings['assets_enabled']) {
+            return false;
+        }
+        
+        // Modo seguro
+        if ($this->settings['safe_mode']) {
+            return false;
+        }
+        
+        // Verificar modo test
+        if ($this->is_test_mode() && !$this->is_test_user()) {
+            return false;
+        }
+        
+        // Aplicar filtros
+        return apply_filters('suple_speed_should_optimize_assets', true);
+    }
+    
+    /**
+     * Verificar modo test
+     */
+    private function is_test_mode() {
+        return $this->settings['assets_test_mode'] ?? false;
+    }
+    
+    /**
+     * Verificar si es usuario de prueba
+     */
+    private function is_test_user() {
+        // Por rol
+        $test_roles = $this->settings['assets_test_roles'] ?? ['administrator'];
+        $user = wp_get_current_user();
+        
+        if (!empty(array_intersect($user->roles, $test_roles))) {
+            return true;
+        }
+        
+        // Por IP
+        $test_ips = $this->settings['assets_test_ips'] ?? [];
+        $user_ip = $this->get_user_ip();
+        
+        return in_array($user_ip, $test_ips);
+    }
+    
+    /**
+     * Obtener IP del usuario
+     */
+    private function get_user_ip() {
+        $ip_keys = ['HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'HTTP_X_FORWARDED', 'HTTP_FORWARDED_FOR', 'HTTP_FORWARDED', 'REMOTE_ADDR'];
+        
+        foreach ($ip_keys as $key) {
+            if (!empty($_SERVER[$key])) {
+                $ip = $_SERVER[$key];
+                if (strpos($ip, ',') !== false) {
+                    $ip = trim(explode(',', $ip)[0]);
+                }
+                return $ip;
+            }
+        }
+        
+        return $_SERVER['REMOTE_ADDR'] ?? '';
+    }
+    
+    /**
+     * Construir mapas de dependencias
+     */
+    private function build_dependency_maps() {
+        global $wp_scripts, $wp_styles;
+        
+        // Construir mapa de dependencias CSS
+        $this->dependency_map['css'] = $this->build_dependency_tree($wp_styles);
+        
+        // Construir mapa de dependencias JS
+        $this->dependency_map['js'] = $this->build_dependency_tree($wp_scripts);
+    }
+    
+    /**
+     * Construir árbol de dependencias
+     */
+    private function build_dependency_tree($wp_dependencies) {
+        $tree = [];
+        $processed = [];
+        
+        foreach ($wp_dependencies->queue as $handle) {
+            $this->build_dependency_branch($handle, $wp_dependencies, $tree, $processed);
+        }
+        
+        return $tree;
+    }
+    
+    /**
+     * Construir rama de dependencias
+     */
+    private function build_dependency_branch($handle, $wp_dependencies, &$tree, &$processed) {
+        if (isset($processed[$handle])) {
+            return;
+        }
+        
+        $processed[$handle] = true;
+        
+        if (!isset($wp_dependencies->registered[$handle])) {
+            return;
+        }
+        
+        $item = $wp_dependencies->registered[$handle];
+        
+        // Procesar dependencias primero
+        if (!empty($item->deps)) {
+            foreach ($item->deps as $dep) {
+                $this->build_dependency_branch($dep, $wp_dependencies, $tree, $processed);
+            }
+        }
+        
+        $tree[$handle] = [
+            'src' => $item->src,
+            'deps' => $item->deps ?? [],
+            'ver' => $item->ver,
+            'group' => $this->classify_handle($handle, $item->src),
+            'can_merge' => $this->can_merge_handle($handle),
+            'can_defer' => $this->can_defer_handle($handle),
+            'media' => $item->args ?? 'all' // Para CSS
+        ];
+    }
+    
+    /**
+     * Clasificar handle en grupo
+     */
+    private function classify_handle($handle, $src) {
+        // Elementor (Grupo C)
+        if (strpos($handle, 'elementor') !== false || 
+            strpos($src, 'elementor') !== false ||
+            strpos($handle, 'swiper') !== false) {
+            return 'C';
+        }
+        
+        // Core WordPress y tema (Grupo A)
+        if (strpos($src, 'wp-admin') !== false ||
+            strpos($src, 'wp-includes') !== false ||
+            strpos($src, '/themes/') !== false ||
+            in_array($handle, ['jquery', 'jquery-core', 'jquery-migrate'])) {
+            return 'A';
+        }
+        
+        // Plugins conocidos (Grupo B)
+        $plugin_indicators = [
+            'woocommerce', 'contact-form-7', 'yoast', 'rankmath',
+            'wpml', 'polylang', 'jetpack'
+        ];
+        
+        foreach ($plugin_indicators as $indicator) {
+            if (strpos($handle, $indicator) !== false || 
+                strpos($src, $indicator) !== false) {
+                return 'B';
+            }
+        }
+        
+        // Por defecto, terceros (Grupo D)
+        return 'D';
+    }
+    
+    /**
+     * Verificar si se puede fusionar handle
+     */
+    private function can_merge_handle($handle) {
+        // Verificar exclusiones
+        if (in_array($handle, $this->excluded_handles)) {
+            return false;
+        }
+        
+        // Verificar lista negra de patrones
+        $no_merge_patterns = [
+            'google-recaptcha',
+            'stripe',
+            'paypal',
+            'facebook',
+            'analytics',
+            'gtag',
+            'customize-preview'
+        ];
+        
+        foreach ($no_merge_patterns as $pattern) {
+            if (strpos($handle, $pattern) !== false) {
+                return false;
+            }
+        }
+        
+        return apply_filters('suple_speed_can_merge_handle', true, $handle);
+    }
+    
+    /**
+     * Verificar si se puede diferir handle
+     */
+    private function can_defer_handle($handle) {
+        // No diferir si está en la lista de no-defer
+        $no_defer_handles = array_merge(
+            $this->settings['assets_no_defer_handles'] ?? [],
+            $this->get_compatibility_no_defer_handles()
+        );
+        
+        if (in_array($handle, $no_defer_handles)) {
+            return false;
+        }
+        
+        // No diferir jQuery y dependencias críticas
+        $critical_handles = ['jquery', 'jquery-core', 'jquery-migrate'];
+        if (in_array($handle, $critical_handles)) {
+            return false;
+        }
+        
+        return apply_filters('suple_speed_can_defer_script', true, $handle);
+    }
+    
+    /**
+     * Obtener handles sin defer por compatibilidad
+     */
+    private function get_compatibility_no_defer_handles() {
+        $no_defer = [];
+        
+        if (function_exists('suple_speed') && suple_speed()->compat) {
+            $no_defer = suple_speed()->compat->get_no_defer_handles();
+        }
+        
+        return $no_defer;
+    }
+    
+    // === OPTIMIZACIÓN CSS ===
+    
+    /**
+     * Optimizar CSS
+     */
+    private function optimize_css() {
+        global $wp_styles;
+        
+        if (empty($this->dependency_map['css'])) {
+            return;
+        }
+        
+        // Agrupar CSS por grupos configurados
+        $enabled_groups = $this->settings['assets_merge_css_groups'] ?? ['A', 'B'];
+        $grouped_css = $this->group_assets($this->dependency_map['css'], $enabled_groups);
+        
+        foreach ($grouped_css as $group => $handles) {
+            if (empty($handles)) {
+                continue;
+            }
+            
+            $merged_file = $this->merge_css_group($group, $handles);
+            
+            if ($merged_file) {
+                // Remover handles originales y añadir el fusionado
+                foreach (array_keys($handles) as $handle) {
+                    wp_dequeue_style($handle);
+                    $this->processed_handles[] = $handle;
+                }
+                
+                // Registrar archivo fusionado
+                wp_enqueue_style(
+                    'suple-speed-css-' . strtolower($group),
+                    $merged_file['url'],
+                    [],
+                    $merged_file['version']
+                );
+            }
+        }
+    }
+    
+    /**
+     * Fusionar grupo de CSS
+     */
+    private function merge_css_group($group, $handles) {
+        $cache_key = $this->generate_css_cache_key($group, $handles);
+        $merged_file = $this->assets_dir . 'css-' . $group . '-' . $cache_key . '.css';
+        $merged_url = $this->assets_url . 'css-' . $group . '-' . $cache_key . '.css';
+        
+        // Verificar si ya existe y está actualizado
+        if (file_exists($merged_file) && $this->is_cache_valid($merged_file, $handles)) {
+            return [
+                'file' => $merged_file,
+                'url' => $merged_url,
+                'version' => filemtime($merged_file)
+            ];
+        }
+        
+        // Crear directorio si no existe
+        if (!file_exists($this->assets_dir)) {
+            wp_mkdir_p($this->assets_dir);
+        }
+        
+        $merged_content = '';
+        $source_files = [];
+        
+        foreach ($handles as $handle => $data) {
+            $css_content = $this->get_css_content($data['src'], $handle);
+            
+            if ($css_content !== false) {
+                // Procesar URLs relativas
+                $css_content = $this->process_css_urls($css_content, $data['src']);
+                
+                // Minificar si está habilitado
+                if ($this->settings['minify_css']) {
+                    $css_content = $this->minify_css($css_content);
+                }
+                
+                $merged_content .= "/* Handle: {$handle} */\n" . $css_content . "\n\n";
+                $source_files[] = $data['src'];
+            }
+        }
+        
+        if (!empty($merged_content)) {
+            // Optimizaciones finales
+            $merged_content = $this->optimize_final_css($merged_content);
+            
+            // Guardar archivo
+            $bytes_written = file_put_contents($merged_file, $merged_content);
+            
+            if ($bytes_written !== false) {
+                // Guardar metadatos
+                $this->save_merge_metadata($merged_file, [
+                    'type' => 'css',
+                    'group' => $group,
+                    'handles' => array_keys($handles),
+                    'source_files' => $source_files,
+                    'size' => $bytes_written,
+                    'created' => time()
+                ]);
+                
+                // Log
+                if ($this->logger) {
+                    $this->logger->info('CSS group merged successfully', [
+                        'group' => $group,
+                        'handles_count' => count($handles),
+                        'output_size' => $bytes_written
+                    ], 'assets');
+                }
+                
+                return [
+                    'file' => $merged_file,
+                    'url' => $merged_url,
+                    'version' => filemtime($merged_file)
+                ];
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Obtener contenido CSS
+     */
+    private function get_css_content($src, $handle) {
+        // Convertir URL relativa a path absoluto
+        if (strpos($src, '//') === false) {
+            $src = home_url($src);
+        }
+        
+        // Verificar si es archivo local
+        $parsed_url = parse_url($src);
+        $site_url = parse_url(home_url());
+        
+        if ($parsed_url['host'] !== $site_url['host']) {
+            // Archivo externo, intentar descargar
+            return $this->download_external_css($src);
+        }
+        
+        // Archivo local
+        $file_path = ABSPATH . ltrim($parsed_url['path'], '/');
+        
+        if (file_exists($file_path)) {
+            return file_get_contents($file_path);
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Descargar CSS externo
+     */
+    private function download_external_css($url) {
+        $transient_key = 'suple_speed_external_css_' . md5($url);
+        $cached_content = get_transient($transient_key);
+        
+        if ($cached_content !== false) {
+            return $cached_content;
+        }
+        
+        $response = wp_remote_get($url, [
+            'timeout' => 10,
+            'user-agent' => 'Suple Speed Plugin'
+        ]);
+        
+        if (!is_wp_error($response) && wp_remote_retrieve_response_code($response) === 200) {
+            $content = wp_remote_retrieve_body($response);
+            
+            // Cache por 1 hora
+            set_transient($transient_key, $content, HOUR_IN_SECONDS);
+            
+            return $content;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Procesar URLs en CSS
+     */
+    private function process_css_urls($css_content, $original_src) {
+        // Obtener directorio base del CSS original
+        $base_url = dirname($original_src);
+        
+        // Reemplazar URLs relativas
+        $css_content = preg_replace_callback(
+            '/url\s*\(\s*[\'"]?([^\'")]+)[\'"]?\s*\)/i',
+            function($matches) use ($base_url) {
+                $url = trim($matches[1], '\'"');
+                
+                // Skip data URIs y URLs absolutas
+                if (strpos($url, 'data:') === 0 || 
+                    strpos($url, 'http') === 0 || 
+                    strpos($url, '//') === 0) {
+                    return $matches[0];
+                }
+                
+                // Convertir URL relativa a absoluta
+                if (strpos($url, '/') === 0) {
+                    $absolute_url = home_url($url);
+                } else {
+                    $absolute_url = $base_url . '/' . $url;
+                }
+                
+                return 'url("' . $absolute_url . '")';
+            },
+            $css_content
+        );
+        
+        return $css_content;
+    }
+    
+    /**
+     * Minificar CSS
+     */
+    private function minify_css($css) {
+        // Eliminar comentarios
+        $css = preg_replace('!/\*[^*]*\*+([^/][^*]*\*+)*/!', '', $css);
+        
+        // Eliminar espacios en blanco innecesarios
+        $css = str_replace(["\r\n", "\r", "\n", "\t"], '', $css);
+        $css = preg_replace('/\s+/', ' ', $css);
+        
+        // Optimizar selectores y propiedades
+        $css = preg_replace('/;\s*}/', '}', $css);
+        $css = preg_replace('/\s*{\s*/', '{', $css);
+        $css = preg_replace('/;\s*/', ';', $css);
+        $css = preg_replace('/:\s*/', ':', $css);
+        
+        return trim($css);
+    }
+    
+    /**
+     * Optimizaciones finales de CSS
+     */
+    private function optimize_final_css($css) {
+        // Eliminar duplicados de reglas
+        // TODO: Implementar eliminación de duplicados más sofisticada
+        
+        // Optimizar colores
+        $css = preg_replace('/#([0-9a-f])\1([0-9a-f])\2([0-9a-f])\3/i', '#$1$2$3', $css);
+        
+        // Optimizar valores 0
+        $css = preg_replace('/\b0+(px|em|%|in|cm|mm|pc|pt|ex)/', '0', $css);
+        
+        return $css;
+    }
+    
+    // === OPTIMIZACIÓN JS ===
+    
+    /**
+     * Optimizar JavaScript
+     */
+    private function optimize_js() {
+        global $wp_scripts;
+        
+        if (empty($this->dependency_map['js'])) {
+            return;
+        }
+        
+        // Agrupar JS por grupos configurados
+        $enabled_groups = $this->settings['assets_merge_js_groups'] ?? ['A', 'B'];
+        $grouped_js = $this->group_assets($this->dependency_map['js'], $enabled_groups);
+        
+        foreach ($grouped_js as $group => $handles) {
+            if (empty($handles)) {
+                continue;
+            }
+            
+            $merged_file = $this->merge_js_group($group, $handles);
+            
+            if ($merged_file) {
+                // Remover handles originales y añadir el fusionado
+                foreach (array_keys($handles) as $handle) {
+                    wp_dequeue_script($handle);
+                    $this->processed_handles[] = $handle;
+                }
+                
+                // Registrar archivo fusionado
+                wp_enqueue_script(
+                    'suple-speed-js-' . strtolower($group),
+                    $merged_file['url'],
+                    [],
+                    $merged_file['version'],
+                    true // Cargar en footer
+                );
+                
+                // Aplicar defer si es apropiado
+                if ($this->settings['defer_js'] && $group !== 'A') {
+                    add_filter('script_loader_tag', function($tag, $handle) use ($group) {
+                        if ($handle === 'suple-speed-js-' . strtolower($group)) {
+                            return str_replace('<script', '<script defer', $tag);
+                        }
+                        return $tag;
+                    }, 10, 2);
+                }
+            }
+        }
+    }
+    
+    /**
+     * Fusionar grupo de JS
+     */
+    private function merge_js_group($group, $handles) {
+        $cache_key = $this->generate_js_cache_key($group, $handles);
+        $merged_file = $this->assets_dir . 'js-' . $group . '-' . $cache_key . '.js';
+        $merged_url = $this->assets_url . 'js-' . $group . '-' . $cache_key . '.js';
+        
+        // Verificar si ya existe y está actualizado
+        if (file_exists($merged_file) && $this->is_cache_valid($merged_file, $handles)) {
+            return [
+                'file' => $merged_file,
+                'url' => $merged_url,
+                'version' => filemtime($merged_file)
+            ];
+        }
+        
+        // Crear directorio si no existe
+        if (!file_exists($this->assets_dir)) {
+            wp_mkdir_p($this->assets_dir);
+        }
+        
+        $merged_content = '';
+        $source_files = [];
+        
+        foreach ($handles as $handle => $data) {
+            $js_content = $this->get_js_content($data['src'], $handle);
+            
+            if ($js_content !== false) {
+                // Minificar si está habilitado
+                if ($this->settings['minify_js']) {
+                    $js_content = $this->minify_js($js_content);
+                }
+                
+                $merged_content .= "/* Handle: {$handle} */\n" . $js_content . "\n;\n\n";
+                $source_files[] = $data['src'];
+            }
+        }
+        
+        if (!empty($merged_content)) {
+            // Guardar archivo
+            $bytes_written = file_put_contents($merged_file, $merged_content);
+            
+            if ($bytes_written !== false) {
+                // Guardar metadatos
+                $this->save_merge_metadata($merged_file, [
+                    'type' => 'js',
+                    'group' => $group,
+                    'handles' => array_keys($handles),
+                    'source_files' => $source_files,
+                    'size' => $bytes_written,
+                    'created' => time()
+                ]);
+                
+                // Log
+                if ($this->logger) {
+                    $this->logger->info('JS group merged successfully', [
+                        'group' => $group,
+                        'handles_count' => count($handles),
+                        'output_size' => $bytes_written
+                    ], 'assets');
+                }
+                
+                return [
+                    'file' => $merged_file,
+                    'url' => $merged_url,
+                    'version' => filemtime($merged_file)
+                ];
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Obtener contenido JS
+     */
+    private function get_js_content($src, $handle) {
+        // Convertir URL relativa a path absoluto
+        if (strpos($src, '//') === false) {
+            $src = home_url($src);
+        }
+        
+        // Verificar si es archivo local
+        $parsed_url = parse_url($src);
+        $site_url = parse_url(home_url());
+        
+        if ($parsed_url['host'] !== $site_url['host']) {
+            // Archivo externo, intentar descargar
+            return $this->download_external_js($src);
+        }
+        
+        // Archivo local
+        $file_path = ABSPATH . ltrim($parsed_url['path'], '/');
+        
+        if (file_exists($file_path)) {
+            return file_get_contents($file_path);
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Descargar JS externo
+     */
+    private function download_external_js($url) {
+        $transient_key = 'suple_speed_external_js_' . md5($url);
+        $cached_content = get_transient($transient_key);
+        
+        if ($cached_content !== false) {
+            return $cached_content;
+        }
+        
+        $response = wp_remote_get($url, [
+            'timeout' => 10,
+            'user-agent' => 'Suple Speed Plugin'
+        ]);
+        
+        if (!is_wp_error($response) && wp_remote_retrieve_response_code($response) === 200) {
+            $content = wp_remote_retrieve_body($response);
+            
+            // Cache por 1 hora
+            set_transient($transient_key, $content, HOUR_IN_SECONDS);
+            
+            return $content;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Minificar JavaScript básico
+     */
+    private function minify_js($js) {
+        // Eliminar comentarios de una línea
+        $js = preg_replace('/\/\/.*$/m', '', $js);
+        
+        // Eliminar comentarios multilínea
+        $js = preg_replace('/\/\*[\s\S]*?\*\//', '', $js);
+        
+        // Eliminar espacios en blanco innecesarios
+        $js = preg_replace('/\s+/', ' ', $js);
+        
+        // Eliminar espacios alrededor de operadores
+        $js = preg_replace('/\s*([{}();,=+\-*\/])\s*/', '$1', $js);
+        
+        return trim($js);
+    }
+    
+    // === UTILIDADES ===
+    
+    /**
+     * Agrupar assets por grupos habilitados
+     */
+    private function group_assets($assets, $enabled_groups) {
+        $grouped = [];
+        
+        foreach ($enabled_groups as $group) {
+            $grouped[$group] = [];
+        }
+        
+        foreach ($assets as $handle => $data) {
+            if (!$data['can_merge']) {
+                continue;
+            }
+            
+            $group = $data['group'];
+            if (in_array($group, $enabled_groups)) {
+                $grouped[$group][$handle] = $data;
+            }
+        }
+        
+        return $grouped;
+    }
+    
+    /**
+     * Generar clave de caché para CSS
+     */
+    private function generate_css_cache_key($group, $handles) {
+        $key_data = [];
+        
+        foreach ($handles as $handle => $data) {
+            $key_data[] = $handle . '-' . ($data['ver'] ?? '1.0');
+        }
+        
+        return substr(md5(implode('|', $key_data)), 0, 12);
+    }
+    
+    /**
+     * Generar clave de caché para JS
+     */
+    private function generate_js_cache_key($group, $handles) {
+        return $this->generate_css_cache_key($group, $handles);
+    }
+    
+    /**
+     * Verificar si la caché es válida
+     */
+    private function is_cache_valid($cache_file, $handles) {
+        if (!file_exists($cache_file)) {
+            return false;
+        }
+        
+        $cache_time = filemtime($cache_file);
+        
+        // Verificar si algún archivo fuente es más nuevo
+        foreach ($handles as $handle => $data) {
+            $source_file = $this->get_source_file_path($data['src']);
+            
+            if ($source_file && file_exists($source_file)) {
+                if (filemtime($source_file) > $cache_time) {
+                    return false;
+                }
+            }
+        }
+        
+        return true;
+    }
+    
+    /**
+     * Obtener path del archivo fuente
+     */
+    private function get_source_file_path($src) {
+        if (strpos($src, home_url()) === 0) {
+            $relative_path = str_replace(home_url(), '', $src);
+            return ABSPATH . ltrim($relative_path, '/');
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Guardar metadatos de merge
+     */
+    private function save_merge_metadata($merged_file, $metadata) {
+        $metadata_file = $merged_file . '.meta';
+        file_put_contents($metadata_file, json_encode($metadata, JSON_PRETTY_PRINT));
+    }
+    
+    /**
+     * Modificar src de CSS
+     */
+    public function modify_css_src($src, $handle) {
+        // Aplicar versión hash para cache busting
+        if ($this->settings['assets_version_hashing']) {
+            $file_path = $this->get_source_file_path($src);
+            if ($file_path && file_exists($file_path)) {
+                $hash = substr(md5_file($file_path), 0, 8);
+                $src = add_query_arg('v', $hash, $src);
+            }
+        }
+        
+        return $src;
+    }
+    
+    /**
+     * Modificar src de JS
+     */
+    public function modify_js_src($src, $handle) {
+        return $this->modify_css_src($src, $handle);
+    }
+    
+    // === CRITICAL CSS Y PRELOADS ===
+    
+    /**
+     * Inyectar Critical CSS
+     */
+    public function inject_critical_css() {
+        if (!$this->settings['critical_css_enabled']) {
+            return;
+        }
+        
+        $critical_css = $this->get_critical_css();
+        
+        if (!empty($critical_css)) {
+            echo '<style id="suple-speed-critical-css">';
+            echo $critical_css;
+            echo '</style>';
+            echo "\n";
+        }
+    }
+    
+    /**
+     * Obtener Critical CSS
+     */
+    private function get_critical_css() {
+        // Aplicar filtros de reglas
+        $critical_css = apply_filters('suple_speed_critical_css_content', '', [
+            'url' => $this->get_current_url(),
+            'post_id' => get_the_ID()
+        ]);
+        
+        // Si no hay CSS específico, usar el general
+        if (empty($critical_css)) {
+            $critical_css = $this->settings['critical_css_general'] ?? '';
+        }
+        
+        return $critical_css;
+    }
+    
+    /**
+     * Inyectar preloads
+     */
+    public function inject_preloads() {
+        $preloads = $this->get_preload_assets();
+        
+        foreach ($preloads as $preload) {
+            $attributes = [];
+            
+            foreach ($preload as $key => $value) {
+                if ($value !== null) {
+                    $attributes[] = $key . '="' . esc_attr($value) . '"';
+                }
+            }
+            
+            echo '<link ' . implode(' ', $attributes) . '>';
+            echo "\n";
+        }
+    }
+    
+    /**
+     * Obtener assets para preload
+     */
+    private function get_preload_assets() {
+        $preloads = [];
+        
+        // Preloads configurados
+        $configured_preloads = $this->settings['preload_assets'] ?? [];
+        
+        foreach ($configured_preloads as $asset) {
+            $preloads[] = [
+                'rel' => 'preload',
+                'href' => $asset['url'],
+                'as' => $asset['as'] ?? 'script',
+                'type' => $asset['type'] ?? null,
+                'crossorigin' => $asset['crossorigin'] ?? null
+            ];
+        }
+        
+        // Aplicar filtros de reglas
+        $preloads = apply_filters('suple_speed_preload_assets', $preloads, [
+            'url' => $this->get_current_url(),
+            'post_id' => get_the_ID()
+        ]);
+        
+        return $preloads;
+    }
+    
+    /**
+     * Obtener URL actual
+     */
+    private function get_current_url() {
+        return home_url($_SERVER['REQUEST_URI'] ?? '');
+    }
+    
+    // === AJAX ===
+    
+    /**
+     * AJAX: Escanear handles activos
+     */
+    public function ajax_scan_handles() {
+        check_ajax_referer('suple_speed_nonce', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_die('Unauthorized');
+        }
+        
+        // Simular frontend para obtener handles
+        $url = home_url('/');
+        if (isset($_POST['scan_url'])) {
+            $url = sanitize_url($_POST['scan_url']);
+        }
+        
+        $handles_data = $this->scan_handles_from_url($url);
+        
+        wp_send_json_success($handles_data);
+    }
+    
+    /**
+     * Escanear handles desde URL específica
+     */
+    private function scan_handles_from_url($url) {
+        // TODO: Implementar escaneado de handles visitando la URL
+        // Por ahora devolver datos de ejemplo
+        
+        global $wp_scripts, $wp_styles;
+        
+        $handles_data = [
+            'css' => [],
+            'js' => []
+        ];
+        
+        // Obtener handles CSS registrados
+        foreach ($wp_styles->registered as $handle => $data) {
+            $handles_data['css'][$handle] = [
+                'handle' => $handle,
+                'src' => $data->src,
+                'deps' => $data->deps,
+                'ver' => $data->ver,
+                'group' => $this->classify_handle($handle, $data->src),
+                'can_merge' => $this->can_merge_handle($handle)
+            ];
+        }
+        
+        // Obtener handles JS registrados
+        foreach ($wp_scripts->registered as $handle => $data) {
+            $handles_data['js'][$handle] = [
+                'handle' => $handle,
+                'src' => $data->src,
+                'deps' => $data->deps,
+                'ver' => $data->ver,
+                'group' => $this->classify_handle($handle, $data->src),
+                'can_merge' => $this->can_merge_handle($handle),
+                'can_defer' => $this->can_defer_handle($handle)
+            ];
+        }
+        
+        return $handles_data;
+    }
+}
