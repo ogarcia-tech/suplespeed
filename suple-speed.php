@@ -436,34 +436,85 @@ class SupleSpeed {
     private function generate_server_rules() {
         // Intentar generar .htaccess para Apache
         $this->generate_htaccess_rules();
-        
+
         // Guardar reglas de Nginx para mostrar en admin
         $this->generate_nginx_rules();
     }
-    
+
+    /**
+     * Obtener instancia del logger incluso durante la activación
+     */
+    private function get_logger() {
+        if ($this->logger instanceof \SupleSpeed\Logger) {
+            return $this->logger;
+        }
+
+        if (!class_exists('\\SupleSpeed\\Logger')) {
+            $logger_file = SUPLE_SPEED_PLUGIN_DIR . 'includes/class-logger.php';
+
+            if (file_exists($logger_file)) {
+                require_once $logger_file;
+            }
+        }
+
+        if (class_exists('\\SupleSpeed\\Logger')) {
+            $this->logger = new \SupleSpeed\Logger();
+            return $this->logger;
+        }
+
+        return null;
+    }
+
     /**
      * Generar reglas .htaccess
      */
     private function generate_htaccess_rules() {
         $htaccess_file = ABSPATH . '.htaccess';
-        
-        if (is_writable(dirname($htaccess_file))) {
-            $rules = $this->get_htaccess_rules();
-            
-            // Insertar reglas de Suple Speed
-            $htaccess_content = file_get_contents($htaccess_file);
-            
-            // Remover reglas existentes de Suple Speed
-            $htaccess_content = preg_replace(
-                '/# BEGIN Suple Speed.*?# END Suple Speed\s*/s',
-                '',
-                $htaccess_content
-            );
-            
-            // Añadir nuevas reglas al inicio
-            $new_content = "# BEGIN Suple Speed\n" . $rules . "\n# END Suple Speed\n\n" . $htaccess_content;
-            
-            file_put_contents($htaccess_file, $new_content);
+        $logger = $this->get_logger();
+        $context = ['file' => $htaccess_file];
+        $directory = dirname($htaccess_file);
+
+        $can_write = file_exists($htaccess_file)
+            ? is_writable($htaccess_file)
+            : is_writable($directory);
+
+        if (!$can_write) {
+            if ($logger) {
+                $logger->error('No se puede escribir en el archivo .htaccess.', $context, 'rules');
+            }
+            return;
+        }
+
+        $rules = $this->get_htaccess_rules();
+        $htaccess_content = '';
+
+        if (file_exists($htaccess_file)) {
+            $existing_content = file_get_contents($htaccess_file);
+
+            if ($existing_content === false) {
+                if ($logger) {
+                    $logger->error('No se pudo leer el archivo .htaccess existente.', $context, 'rules');
+                }
+                return;
+            }
+
+            $htaccess_content = $existing_content;
+        }
+
+        // Remover reglas existentes de Suple Speed
+        $htaccess_content = preg_replace(
+            '/# BEGIN Suple Speed.*?# END Suple Speed\s*/s',
+            '',
+            $htaccess_content
+        );
+
+        // Añadir nuevas reglas al inicio
+        $new_content = "# BEGIN Suple Speed\n" . $rules . "\n# END Suple Speed\n\n" . $htaccess_content;
+
+        if (file_put_contents($htaccess_file, $new_content) === false) {
+            if ($logger) {
+                $logger->error('No se pudo escribir en el archivo .htaccess.', $context, 'rules');
+            }
         }
     }
     
