@@ -104,12 +104,43 @@
         },
 
         setupAjaxForms: function() {
-            // Auto-guardar en formularios
-            $('.suple-auto-save input, .suple-auto-save select, .suple-auto-save textarea').on('change', function() {
+            const $forms = $('.suple-auto-save');
+            if ($forms.length === 0) return;
+
+            const autoSaveEnabled = typeof supleSpeedAdmin === 'undefined' || supleSpeedAdmin.autoSaveEnabled !== false;
+
+            if (!autoSaveEnabled) {
                 clearTimeout(window.supleAutoSaveTimer);
-                window.supleAutoSaveTimer = setTimeout(function() {
-                    SupleSpeedAdmin.autoSave();
-                }, 2000);
+                $forms.each(function() {
+                    const $form = $(this);
+                    const indicatorTimer = $form.data('autoSaveIndicatorTimer');
+                    if (indicatorTimer) {
+                        clearTimeout(indicatorTimer);
+                        $form.removeData('autoSaveIndicatorTimer');
+                    }
+
+                    const $indicator = $form.data('autoSaveIndicator');
+                    if ($indicator && $indicator.length) {
+                        $indicator.remove();
+                        $form.removeData('autoSaveIndicator');
+                    }
+                });
+                return;
+            }
+
+            $forms.each(function() {
+                const $form = $(this);
+                const formAutoSave = $form.data('auto-save');
+                if (formAutoSave === false || formAutoSave === 'false') {
+                    return;
+                }
+
+                $form.on('change', 'input, select, textarea', function() {
+                    clearTimeout(window.supleAutoSaveTimer);
+                    window.supleAutoSaveTimer = setTimeout(function() {
+                        SupleSpeedAdmin.autoSave($form);
+                    }, 2000);
+                });
             });
         },
 
@@ -736,23 +767,75 @@
             });
         },
 
-        autoSave: function() {
-            const $form = $('.suple-auto-save');
-            if ($form.length === 0) return;
-            
-            // Mostrar indicador de guardado
-            const $indicator = $('<span class="suple-auto-save-indicator">Saving...</span>');
-            $form.append($indicator);
-            
-            // Simular guardado (en implementación real, enviar AJAX)
-            setTimeout(function() {
-                $indicator.text('Saved').addClass('success');
-                setTimeout(function() {
-                    $indicator.fadeOut(function() {
-                        $indicator.remove();
-                    });
+        autoSave: function($form) {
+            const autoSaveEnabled = typeof supleSpeedAdmin === 'undefined' || supleSpeedAdmin.autoSaveEnabled !== false;
+            if (!autoSaveEnabled) return;
+
+            const $targetForm = $form && $form.length ? $form : $('.suple-auto-save');
+            const formAutoSave = $targetForm.data('auto-save');
+            if ($targetForm.length === 0 || formAutoSave === false || formAutoSave === 'false') return;
+
+            const settings = {};
+            $targetForm.find('input, select, textarea').each(function() {
+                const $input = $(this);
+                const name = $input.attr('name');
+
+                if (!name) return;
+
+                if ($input.is(':checkbox')) {
+                    settings[name] = $input.is(':checked');
+                } else if ($input.is('[multiple]')) {
+                    settings[name] = $input.val() || [];
+                } else {
+                    settings[name] = $input.val();
+                }
+            });
+
+            let $indicator = $targetForm.data('autoSaveIndicator');
+            if (!$indicator || !$indicator.length) {
+                $indicator = $('<span class="suple-auto-save-indicator"></span>').hide();
+                $('body').append($indicator);
+                $targetForm.data('autoSaveIndicator', $indicator);
+            }
+
+            const previousTimer = $targetForm.data('autoSaveIndicatorTimer');
+            if (previousTimer) {
+                clearTimeout(previousTimer);
+                $targetForm.removeData('autoSaveIndicatorTimer');
+            }
+
+            const setIndicatorState = function(text, state) {
+                $indicator.stop(true, true);
+                $indicator.removeClass('success error');
+
+                if (state === 'success') {
+                    $indicator.addClass('success');
+                } else if (state === 'error') {
+                    $indicator.addClass('error');
+                }
+
+                $indicator.text(text).fadeIn(150);
+            };
+
+            const savingText = (supleSpeedAdmin.strings && supleSpeedAdmin.strings.processing) || 'Saving...';
+            setIndicatorState(savingText, null);
+
+            SupleSpeedAdmin.ajaxRequest('save_settings', {
+                settings: settings
+            }, function(data) {
+                const message = data && data.message ? data.message : ((supleSpeedAdmin.strings && supleSpeedAdmin.strings.success) || 'Saved');
+                setIndicatorState(message, 'success');
+
+                const hideTimeout = setTimeout(function() {
+                    $indicator.fadeOut(200);
                 }, 2000);
-            }, 1000);
+
+                $targetForm.data('autoSaveIndicatorTimer', hideTimeout);
+            }, function(error) {
+                const message = (typeof error === 'string' && error) ? error : ((supleSpeedAdmin.strings && supleSpeedAdmin.strings.error) || 'An error occurred');
+                setIndicatorState(message, 'error');
+                SupleSpeedAdmin.showNotice('error', message);
+            });
         },
 
         initTooltips: function() {
