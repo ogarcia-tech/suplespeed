@@ -530,4 +530,8 @@ $current_settings = $this->get_current_settings();
 .suple-auto-save-indicator.success {
     background: var(--suple-success);
 }
+
+.suple-auto-save-indicator.error {
+    background: var(--suple-error);
+}
 </style>
