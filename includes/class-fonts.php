@@ -14,6 +14,7 @@ class Fonts {
     private $logger;
     private $fonts_dir;
     private $fonts_url;
+    private $capturing_head = false;
     
     /**
      * Fuentes detectadas
@@ -40,7 +41,7 @@ class Fonts {
         if ($this->settings['fonts_local']) {
             // Capturar y procesar fuentes en el frontend
             add_action('wp_head', [$this, 'capture_google_fonts'], 1);
-            add_action('wp_footer', [$this, 'inject_local_fonts'], 999);
+            add_action('wp_head', [$this, 'inject_local_fonts'], PHP_INT_MAX);
             
             // Filtrar URLs de Google Fonts
             add_filter('style_loader_src', [$this, 'filter_google_fonts_url'], 10, 2);
@@ -58,19 +59,29 @@ class Fonts {
      * Capturar Google Fonts del HTML
      */
     public function capture_google_fonts() {
+        if ($this->capturing_head) {
+            return;
+        }
+
+        $this->capturing_head = true;
         ob_start();
     }
-    
+
     /**
      * Inyectar fuentes locales
      */
     public function inject_local_fonts() {
+        if (!$this->capturing_head) {
+            return;
+        }
+
         $buffer = ob_get_clean();
-        
+        $this->capturing_head = false;
+
         if (!empty($buffer)) {
             $buffer = $this->process_google_fonts_in_html($buffer);
         }
-        
+
         echo $buffer;
     }
     
