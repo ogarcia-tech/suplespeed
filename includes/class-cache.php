@@ -364,30 +364,30 @@ class Cache {
      */
     public function serve_cache() {
         if (!$this->should_cache_page()) {
-            return false;
+            return;
         }
-        
+
         $cache_content = $this->get_cache_content();
-        
-        if ($cache_content !== false) {
-            // Headers de caché
-            $this->send_cache_headers();
-            
-            // Enviar contenido
-            echo $cache_content;
-            
-            // Log del hit de caché
-            if ($this->logger) {
-                $this->logger->debug('Cache hit served', [
-                    'url' => $this->get_current_url(),
-                    'cache_key' => $this->generate_cache_key()
-                ], 'cache');
-            }
-            
-            exit;
+
+        if ($cache_content === false) {
+            return;
         }
-        
-        return false;
+
+        // Headers de caché
+        $this->send_cache_headers();
+
+        // Enviar contenido
+        echo $cache_content;
+
+        // Log del hit de caché
+        if ($this->logger) {
+            $this->logger->debug('Cache hit served', [
+                'url' => $this->get_current_url(),
+                'cache_key' => $this->generate_cache_key()
+            ], 'cache');
+        }
+
+        exit;
     }
     
     /**
