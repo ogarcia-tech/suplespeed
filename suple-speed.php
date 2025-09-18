@@ -176,6 +176,7 @@ class SupleSpeed {
     private function init_main_hooks() {
         // Solo ejecutar optimizaciones en frontend si no estamos en modo editor
         if (!is_admin() && !$this->elementor_guard->is_editor_mode()) {
+            add_action('template_redirect', [$this->cache, 'serve_cache'], 0);
             add_action('template_redirect', [$this, 'start_output_buffering'], 1);
             add_action('wp_enqueue_scripts', [$this->assets, 'optimize_scripts_styles'], 999);
             add_action('wp_head', [$this->assets, 'inject_critical_css'], 1);
