@@ -11,6 +11,7 @@
             this.initComponents();
             this.setupToggles();
             this.setupAjaxForms();
+            this.setupTabs();
             this.initializeAssetsUI();
         },
 
@@ -155,6 +156,159 @@
                     }, 2000);
                 });
             });
+        },
+
+        setupTabs: function() {
+            const self = this;
+            const $tabContainers = $('.suple-tabs');
+            if ($tabContainers.length === 0) {
+                return;
+            }
+
+            const activateFromHash = function(hash, options) {
+                if (!hash) {
+                    return;
+                }
+
+                self.activateTab(hash, options);
+            };
+
+            $(document).on('click', '.suple-tab-nav a', function(e) {
+                const $link = $(this);
+                const target = $link.attr('href');
+
+                if (!target || target.charAt(0) !== '#') {
+                    return;
+                }
+
+                if ($(target).length === 0) {
+                    return;
+                }
+
+                e.preventDefault();
+                activateFromHash(target, {
+                    updateHash: true,
+                    focus: false
+                });
+            });
+
+            $(document).on('click', '.suple-open-tab', function(e) {
+                const $trigger = $(this);
+                const tabAttr = $trigger.data('tab');
+
+                if (!tabAttr) {
+                    return;
+                }
+
+                let selector = String(tabAttr);
+                if (selector.charAt(0) !== '#') {
+                    selector = selector.indexOf('tab-') === 0 ? '#' + selector : '#tab-' + selector;
+                }
+
+                const $target = $(selector);
+                if ($target.length === 0) {
+                    return;
+                }
+
+                e.preventDefault();
+                activateFromHash(selector, {
+                    updateHash: true,
+                    scrollIntoView: true
+                });
+            });
+
+            const initialHash = window.location.hash;
+            if (initialHash && $(initialHash).length > 0) {
+                activateFromHash(initialHash);
+            } else {
+                const $activeLink = $tabContainers.find('.suple-tab-nav a.active').first();
+                if ($activeLink.length) {
+                    const href = $activeLink.attr('href');
+                    if (href && href.charAt(0) === '#' && $(href).length > 0) {
+                        activateFromHash(href);
+                    }
+                }
+            }
+
+            $(window).on('hashchange.supleTabs', function() {
+                const hash = window.location.hash;
+                if (hash && $(hash).length > 0) {
+                    activateFromHash(hash);
+                }
+            });
+        },
+
+        activateTab: function(tab, options) {
+            if (!tab) {
+                return;
+            }
+
+            let selector = tab;
+            if (typeof selector === 'string') {
+                selector = selector.trim();
+                if (selector.charAt(0) !== '#') {
+                    selector = selector.indexOf('tab-') === 0 ? '#' + selector : '#tab-' + selector;
+                }
+            }
+
+            const $target = $(selector);
+            if ($target.length === 0) {
+                return;
+            }
+
+            const settings = $.extend({
+                updateHash: false,
+                scrollIntoView: false,
+                focus: false
+            }, options);
+
+            const $container = $target.closest('.suple-tabs');
+            if ($container.length === 0) {
+                return;
+            }
+
+            const $navLinks = $container.find('.suple-tab-nav a');
+            const normalizedSelector = selector.replace(/^#/, '');
+
+            $navLinks.each(function() {
+                const $link = $(this);
+                const href = ($link.attr('href') || '').trim();
+                const normalizedHref = href.replace(/^#/, '');
+                const isActive = href === selector || normalizedHref === normalizedSelector;
+
+                $link.toggleClass('active', isActive);
+                $link.attr('aria-selected', isActive ? 'true' : 'false');
+            });
+
+            const $contents = $container.find('.suple-tab-content');
+            $contents.each(function() {
+                const $content = $(this);
+                const isTarget = $content.is($target);
+                $content.toggleClass('active', isTarget);
+                $content.attr('aria-hidden', isTarget ? 'false' : 'true');
+            });
+
+            if (settings.updateHash && selector && selector !== window.location.hash) {
+                if (typeof history.replaceState === 'function') {
+                    history.replaceState(null, '', window.location.pathname + window.location.search + selector);
+                } else {
+                    window.location.hash = selector;
+                }
+            }
+
+            if (settings.focus) {
+                const $activeLink = $navLinks.filter('.active').first();
+                if ($activeLink.length) {
+                    $activeLink.trigger('focus');
+                }
+            }
+
+            if (settings.scrollIntoView) {
+                const container = $container.get(0);
+                if (container && typeof container.scrollIntoView === 'function') {
+                    container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            }
         },
 
         // === AJAX METHODS ===
