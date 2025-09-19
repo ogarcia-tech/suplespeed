@@ -893,6 +893,11 @@ if (empty($active_tab) || !isset($tabs[$active_tab])) {
                         </li>
                     </ul>
                     <div class="suple-mt-2">
+                        <a class="suple-button" href="<?php echo esc_url(admin_url('admin.php?page=suple-speed-settings#tab-cache')); ?>">
+                            <?php _e('Adjust Cache Settings', 'suple-speed'); ?>
+                        </a>
+                    </div>
+                    <div class="suple-mt-2">
                         <button type="button" class="suple-button suple-purge-cache" data-purge-action="all">
                             <span class="dashicons dashicons-update"></span>
                             <?php _e('Purge Entire Cache', 'suple-speed'); ?>
