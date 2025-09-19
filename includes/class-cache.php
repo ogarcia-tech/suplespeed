@@ -13,6 +13,13 @@ class Cache {
     private $settings;
     private $cache_dir;
     private $logger;
+    private $static_resource_prefixes = [
+        '/wp-content/uploads/',
+        '/wp-content/cache/',
+        '/wp-content/themes/',
+        '/wp-content/plugins/',
+        '/wp-includes/',
+    ];
     
     /**
      * Variaciones de caché
@@ -50,12 +57,13 @@ class Cache {
         
         // Purga en cambios de opciones importantes
         add_action('update_option', [$this, 'maybe_purge_on_option_update'], 10, 2);
-        
+
         // Purga programada
         add_action('suple_speed_cleanup_cache', [$this, 'cleanup_expired_cache']);
-        
+
         // Headers de caché
         add_action('wp_head', [$this, 'add_cache_headers'], 1);
+        add_filter('wp_headers', [$this, 'maybe_apply_static_resource_headers']);
     }
     
     /**
@@ -548,14 +556,118 @@ class Cache {
         if ($this->should_cache_page()) {
             // Meta tag para identificar páginas cacheables
             echo '<meta name="suple-speed-cacheable" content="true">' . "\n";
-            
+
             // Información de caché para debug
             if (defined('WP_DEBUG') && WP_DEBUG) {
                 echo '<meta name="suple-speed-cache-key" content="' . esc_attr($this->generate_cache_key()) . '">' . "\n";
             }
         }
     }
-    
+
+    /**
+     * Añade headers de caché para recursos estáticos servidos por PHP.
+     */
+    public function maybe_apply_static_resource_headers($headers) {
+        $resource = $this->get_static_resource_request();
+
+        if (!$resource) {
+            return $headers;
+        }
+
+        $ttl = (int) ($this->settings['cache_ttl'] ?? 24 * HOUR_IN_SECONDS);
+
+        if ($ttl <= 0) {
+            return $headers;
+        }
+
+        $existing_headers = array_change_key_case($headers, CASE_LOWER);
+        $sent_headers = $this->get_sent_headers();
+
+        if (!isset($existing_headers['cache-control']) && !isset($sent_headers['cache-control'])) {
+            $headers['Cache-Control'] = sprintf('public, max-age=%d', $ttl);
+        }
+
+        if (!isset($existing_headers['expires']) && !isset($sent_headers['expires'])) {
+            $headers['Expires'] = gmdate('D, d M Y H:i:s', time() + $ttl) . ' GMT';
+        }
+
+        if ($resource['file'] && !isset($existing_headers['etag']) && !isset($sent_headers['etag'])) {
+            $headers['ETag'] = $this->generate_file_etag($resource['file']);
+        }
+
+        return $headers;
+    }
+
+    /**
+     * Detecta si la petición actual es para un recurso estático local.
+     */
+    private function get_static_resource_request() {
+        $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+
+        if (!in_array($method, ['GET', 'HEAD'], true)) {
+            return null;
+        }
+
+        $request_uri = $_SERVER['REQUEST_URI'] ?? '';
+        $path = $request_uri ? wp_parse_url($request_uri, PHP_URL_PATH) : '';
+
+        if (!$path) {
+            return null;
+        }
+
+        $normalized_path = '/' . ltrim($path, '/');
+
+        foreach ($this->static_resource_prefixes as $prefix) {
+            if (strpos($normalized_path, $prefix) === 0) {
+                $file_path = ABSPATH . ltrim($normalized_path, '/');
+                $real_root = realpath(ABSPATH);
+                $real_path = realpath($file_path);
+
+                if ($real_path && $real_root && strpos($real_path, $real_root) === 0 && is_file($real_path)) {
+                    return [
+                        'path' => $normalized_path,
+                        'file' => $real_path,
+                    ];
+                }
+
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Obtiene el listado de headers ya registrados.
+     */
+    private function get_sent_headers() {
+        $sent_headers = [];
+
+        if (function_exists('headers_list')) {
+            foreach (headers_list() as $header_line) {
+                $parts = explode(':', $header_line, 2);
+                if (count($parts) === 2) {
+                    $sent_headers[strtolower(trim($parts[0]))] = trim($parts[1]);
+                }
+            }
+        }
+
+        return $sent_headers;
+    }
+
+    /**
+     * Genera un ETag basado en el archivo físico.
+     */
+    private function generate_file_etag($file_path) {
+        $stat = @stat($file_path);
+
+        if (!$stat) {
+            return '"' . md5($file_path) . '"';
+        }
+
+        return '"' . md5($file_path . '|' . $stat['mtime'] . '|' . $stat['size']) . '"';
+    }
+
     // === PURGA DE CACHÉ ===
     
     /**
