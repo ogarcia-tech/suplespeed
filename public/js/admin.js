@@ -33,6 +33,7 @@
             
             // Guardar configuración
             $(document).on('click', '.suple-save-settings', this.saveSettings);
+            $(document).on('click', '.suple-save-cdn-settings', this.saveCdnSettings);
             
             // Resetear configuración
             $(document).on('click', '.suple-reset-settings', this.resetSettings);
@@ -297,9 +298,21 @@
                 $button.text(originalText);
                 $button.prop('disabled', false);
                 SupleSpeedAdmin.showNotice('success', data.message);
-                
+
                 // Actualizar estadísticas si están visibles
                 SupleSpeedAdmin.updateCacheStats();
+
+                if (data.cdn_results) {
+                    const results = Array.isArray(data.cdn_results)
+                        ? data.cdn_results
+                        : Object.values(data.cdn_results);
+
+                    results.forEach(function(result) {
+                        if (!result || !result.message) return;
+
+                        SupleSpeedAdmin.showNotice(result.success ? 'success' : 'error', result.message);
+                    });
+                }
             }, function(error) {
                 $button.text(originalText);
                 $button.prop('disabled', false);
@@ -510,6 +523,42 @@
                 $button.text(originalText);
                 $button.prop('disabled', false);
                 SupleSpeedAdmin.showNotice('error', error);
+            });
+        },
+
+        saveCdnSettings: function(e) {
+            e.preventDefault();
+
+            const $button = $(this);
+            const $form = $button.closest('form');
+            const originalText = $button.text();
+
+            const payload = {
+                cloudflare: {
+                    enabled: $form.find('[name="cdn_cloudflare_enabled"]').is(':checked'),
+                    api_token: ($form.find('[name="cdn_cloudflare_api_token"]').val() || '').trim(),
+                    zone_id: ($form.find('[name="cdn_cloudflare_zone_id"]').val() || '').trim()
+                },
+                bunnycdn: {
+                    enabled: $form.find('[name="cdn_bunnycdn_enabled"]').is(':checked'),
+                    api_key: ($form.find('[name="cdn_bunnycdn_api_key"]').val() || '').trim(),
+                    zone_id: ($form.find('[name="cdn_bunnycdn_zone_id"]').val() || '').trim()
+                }
+            };
+
+            $button.html('<span class="suple-spinner"></span> ' + supleSpeedAdmin.strings.processing);
+            $button.prop('disabled', true);
+
+            SupleSpeedAdmin.ajaxRequest('save_cdn_settings', {
+                cdn: payload
+            }, function(data) {
+                $button.text(originalText);
+                $button.prop('disabled', false);
+                SupleSpeedAdmin.showNotice('success', data.message || (supleSpeedAdmin.strings.success || 'Saved'));
+            }, function(error) {
+                $button.text(originalText);
+                $button.prop('disabled', false);
+                SupleSpeedAdmin.showNotice('error', error || supleSpeedAdmin.strings.error);
             });
         },
 

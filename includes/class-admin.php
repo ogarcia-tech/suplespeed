@@ -48,6 +48,7 @@ class Admin {
 
         // AJAX handlers
         add_action('wp_ajax_suple_speed_save_settings', [$this, 'ajax_save_settings']);
+        add_action('wp_ajax_suple_speed_save_cdn_settings', [$this, 'ajax_save_cdn_settings']);
         add_action('wp_ajax_suple_speed_reset_settings', [$this, 'ajax_reset_settings']);
         add_action('wp_ajax_suple_speed_export_settings', [$this, 'ajax_export_settings']);
         add_action('wp_ajax_suple_speed_import_settings', [$this, 'ajax_import_settings']);
@@ -237,6 +238,7 @@ class Admin {
      */
     public function sanitize_settings($input) {
         $sanitized = [];
+        $current_settings = get_option('suple_speed_settings', []);
         
         // Configuraciones booleanas
         $boolean_settings = [
@@ -313,6 +315,58 @@ class Admin {
             sanitize_textarea_field($input['images_critical_manual']) :
             '';
 
+        if (isset($input['cdn_integrations']) && is_array($input['cdn_integrations'])) {
+            $sanitized['cdn_integrations'] = $this->sanitize_cdn_settings($input['cdn_integrations']);
+        } else {
+            $sanitized['cdn_integrations'] = $current_settings['cdn_integrations'] ?? [];
+        }
+
+        return $sanitized;
+    }
+
+    /**
+     * Sanitizar configuraciones de CDN
+     */
+    private function sanitize_cdn_settings($input) {
+        $defaults = [
+            'cloudflare' => [
+                'enabled' => false,
+                'api_token' => '',
+                'zone_id' => '',
+            ],
+            'bunnycdn' => [
+                'enabled' => false,
+                'api_key' => '',
+                'zone_id' => '',
+            ],
+        ];
+
+        $sanitized = [];
+
+        foreach ($defaults as $provider => $provider_defaults) {
+            $provider_input = $input[$provider] ?? [];
+
+            if (!is_array($provider_input)) {
+                $provider_input = [];
+            }
+
+            $provider_settings = [
+                'enabled' => filter_var($provider_input['enabled'] ?? false, FILTER_VALIDATE_BOOLEAN),
+            ];
+
+            foreach ($provider_defaults as $field => $default_value) {
+                if ($field === 'enabled') {
+                    continue;
+                }
+
+                $value = $provider_input[$field] ?? '';
+                $provider_settings[$field] = $value === ''
+                    ? ''
+                    : sanitize_text_field($value);
+            }
+
+            $sanitized[$provider] = wp_parse_args($provider_settings, $provider_defaults);
+        }
 
         return $sanitized;
     }
@@ -724,7 +778,8 @@ class Admin {
         // Sanitizar y guardar
         $sanitized_settings = $this->sanitize_settings($settings);
         update_option('suple_speed_settings', $sanitized_settings);
-        
+        $this->settings = get_option('suple_speed_settings', []);
+
         // Log del cambio
         if ($this->logger) {
             $this->logger->info('Settings updated via AJAX', [
@@ -754,7 +809,9 @@ class Admin {
         if (function_exists('suple_speed')) {
             suple_speed()->reset_default_options();
         }
-        
+
+        $this->settings = get_option('suple_speed_settings', []);
+
         wp_send_json_success([
             'message' => __('Settings reset to defaults', 'suple-speed')
         ]);
@@ -821,6 +878,7 @@ class Admin {
         // Importar configuraciones
         $sanitized_settings = $this->sanitize_settings($import_data['settings']);
         update_option('suple_speed_settings', $sanitized_settings);
+        $this->settings = get_option('suple_speed_settings', []);
         
         // Importar reglas si existen
         if (isset($import_data['rules']) && is_array($import_data['rules'])) {
@@ -834,274 +892,41 @@ class Admin {
     }
 
     /**
-     * AJAX: Importar reglas
+
+     * AJAX: Guardar credenciales CDN
      */
-    public function ajax_import_rules() {
+    public function ajax_save_cdn_settings() {
         check_ajax_referer('suple_speed_nonce', 'nonce');
 
         if (!current_user_can('manage_options')) {
-            wp_send_json_error(__('Unauthorized', 'suple-speed'));
+            wp_die('Unauthorized');
         }
 
-        if (!isset($_FILES['rules_file'])) {
-            wp_send_json_error(__('No file uploaded', 'suple-speed'));
+        $cdn_settings = isset($_POST['cdn']) ? wp_unslash($_POST['cdn']) : [];
+        if (!is_array($cdn_settings)) {
+            $cdn_settings = [];
         }
 
-        $file = $_FILES['rules_file'];
+        $sanitized_cdn = $this->sanitize_cdn_settings($cdn_settings);
+        $current_settings = get_option('suple_speed_settings', []);
+        $current_settings['cdn_integrations'] = $sanitized_cdn;
 
-        if ($file['error'] !== UPLOAD_ERR_OK) {
-            wp_send_json_error(__('File upload error', 'suple-speed'));
+        update_option('suple_speed_settings', $current_settings);
+        $this->settings = $current_settings;
+
+        if ($this->logger) {
+            $enabled_providers = array_keys(array_filter($sanitized_cdn, function($config) {
+                return !empty($config['enabled']);
+            }));
+
+            $this->logger->info('CDN settings updated', [
+                'enabled_providers' => $enabled_providers,
+            ], 'cdn');
         }
-
-        $contents = file_get_contents($file['tmp_name']);
-
-        if ($contents === false) {
-            wp_send_json_error(__('Unable to read the uploaded file', 'suple-speed'));
-        }
-
-        $decoded = json_decode($contents, true);
-
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            wp_send_json_error(__('Invalid JSON file', 'suple-speed'));
-        }
-
-        if (isset($decoded['rules']) && is_array($decoded['rules'])) {
-            $rules_data = $decoded['rules'];
-        } elseif (is_array($decoded)) {
-            $rules_data = $decoded;
-        } else {
-            wp_send_json_error(__('Invalid rules file format', 'suple-speed'));
-        }
-
-        if (!function_exists('suple_speed') || !isset(suple_speed()->rules)) {
-            wp_send_json_error(__('Rules module not available', 'suple-speed'));
-        }
-
-        $replace = filter_var($_POST['replace'] ?? false, FILTER_VALIDATE_BOOLEAN);
-
-        $rules_module = suple_speed()->rules;
-        $imported = $rules_module->import_rules($rules_data, $replace);
-
-        $message = sprintf(
-            _n('%d rule imported successfully.', '%d rules imported successfully.', $imported, 'suple-speed'),
-            $imported
-        );
 
         wp_send_json_success([
-            'message' => $message,
-            'imported' => $imported,
-            'reload' => true
-        ]);
-    }
+            'message' => __('CDN credentials saved successfully', 'suple-speed'),
 
-    /**
-     * AJAX: Limpiar caché LQIP
-     */
-    public function ajax_clear_lqip_cache() {
-        check_ajax_referer('suple_speed_nonce', 'nonce');
-
-        if (!current_user_can('manage_options')) {
-            wp_send_json_error(__('Unauthorized', 'suple-speed'));
-        }
-
-        if (!function_exists('suple_speed') || !isset(suple_speed()->images)) {
-            wp_send_json_error(__('Images module not available', 'suple-speed'));
-        }
-
-        $images_module = suple_speed()->images;
-        $cleared = (int) $images_module->cleanup_lqip_cache();
-        $stats = $images_module->get_optimization_stats();
-
-        $message = $cleared > 0
-            ? sprintf(_n('%d LQIP placeholder removed from cache.', '%d LQIP placeholders removed from cache.', $cleared, 'suple-speed'), $cleared)
-            : __('LQIP cache is already clean.', 'suple-speed');
-
-        wp_send_json_success([
-            'message' => $message,
-            'cleared' => $cleared,
-            'stats' => $stats
-        ]);
-    }
-
-    /**
-     * AJAX: Exportar logs
-     */
-    public function ajax_export_logs() {
-        check_ajax_referer('suple_speed_nonce', 'nonce');
-
-        if (!current_user_can('manage_options')) {
-            wp_send_json_error(__('Unauthorized', 'suple-speed'));
-        }
-
-        if (!$this->logger && function_exists('suple_speed') && isset(suple_speed()->logger)) {
-            $this->logger = suple_speed()->logger;
-        }
-
-        if (!$this->logger) {
-            wp_send_json_error(__('Logger module not available', 'suple-speed'));
-        }
-
-        $format = sanitize_key($_POST['format'] ?? 'json');
-        $allowed_formats = ['json', 'csv', 'txt'];
-        if (!in_array($format, $allowed_formats, true)) {
-            $format = 'json';
-        }
-
-        $level = sanitize_text_field($_POST['level'] ?? '');
-        $module = sanitize_text_field($_POST['module'] ?? '');
-        $days = isset($_POST['days']) && $_POST['days'] !== '' ? intval($_POST['days']) : null;
-
-        if ($days !== null && $days <= 0) {
-            $days = null;
-        }
-
-        $level_filter = $level !== '' ? $level : null;
-        $module_filter = $module !== '' ? $module : null;
-
-        $logs = $this->logger->get_logs(10000, 0, $level_filter, $module_filter);
-
-        if ($days) {
-            $cutoff = time() - ($days * DAY_IN_SECONDS);
-            $logs = array_filter($logs, function($log) use ($cutoff) {
-                return isset($log->timestamp) && strtotime($log->timestamp) >= $cutoff;
-            });
-        }
-
-        $count = count($logs);
-        $content = $this->logger->export_logs($format, $level_filter, $module_filter, $days);
-        $filename = 'suple-speed-logs-' . date('Y-m-d-H-i-s') . '.' . $format;
-
-        switch ($format) {
-            case 'csv':
-                $mime = 'text/csv';
-                break;
-            case 'txt':
-                $mime = 'text/plain';
-                break;
-            default:
-                $mime = 'application/json';
-        }
-
-        $message = $count > 0
-            ? sprintf(_n('Exported %d log entry.', 'Exported %d log entries.', $count, 'suple-speed'), $count)
-            : __('No log entries matched the selected filters.', 'suple-speed');
-
-        wp_send_json_success([
-            'filename' => $filename,
-            'content' => $content,
-            'mime' => $mime,
-            'message' => $message,
-            'count' => $count
-        ]);
-    }
-
-    /**
-     * AJAX: Limpiar logs
-     */
-    public function ajax_clear_logs() {
-        check_ajax_referer('suple_speed_nonce', 'nonce');
-
-        if (!current_user_can('manage_options')) {
-            wp_send_json_error(__('Unauthorized', 'suple-speed'));
-        }
-
-        if (!$this->logger && function_exists('suple_speed') && isset(suple_speed()->logger)) {
-            $this->logger = suple_speed()->logger;
-        }
-
-        if (!$this->logger) {
-            wp_send_json_error(__('Logger module not available', 'suple-speed'));
-        }
-
-        $level = sanitize_text_field($_POST['level'] ?? '');
-        $module = sanitize_text_field($_POST['module'] ?? '');
-        $days = isset($_POST['days']) && $_POST['days'] !== '' ? intval($_POST['days']) : null;
-
-        if ($days !== null && $days <= 0) {
-            $days = null;
-        }
-
-        $level_filter = $level !== '' ? $level : null;
-        $module_filter = $module !== '' ? $module : null;
-
-        $cleared = $this->logger->clear_logs($level_filter, $module_filter, $days);
-
-        if ($cleared === false) {
-            wp_send_json_error(__('Unable to clear logs at this time.', 'suple-speed'));
-        }
-
-        $stats = $this->logger->get_log_stats();
-
-        $message = $cleared > 0
-            ? sprintf(_n('Removed %d log entry.', 'Removed %d log entries.', $cleared, 'suple-speed'), $cleared)
-            : __('No logs matched the selected filters.', 'suple-speed');
-
-        wp_send_json_success([
-            'message' => $message,
-            'cleared' => (int) $cleared,
-            'stats' => $stats
-        ]);
-    }
-
-    /**
-     * AJAX: Probar warmup de caché
-     */
-    public function ajax_test_cache_warmup() {
-        check_ajax_referer('suple_speed_nonce', 'nonce');
-
-        if (!current_user_can('manage_options')) {
-            wp_send_json_error(__('Unauthorized', 'suple-speed'));
-        }
-
-        if (!function_exists('suple_speed') || !isset(suple_speed()->cache)) {
-            wp_send_json_error(__('Cache module not available', 'suple-speed'));
-        }
-
-        $url = esc_url_raw($_POST['url'] ?? home_url('/'));
-
-        if (!$url || !filter_var($url, FILTER_VALIDATE_URL)) {
-            wp_send_json_error(__('Invalid URL provided for warmup test.', 'suple-speed'));
-        }
-
-        $cache_module = suple_speed()->cache;
-
-        $initial_stats = $cache_module->get_cache_stats();
-        $cache_module->purge_url($url);
-
-        $start = microtime(true);
-        $response = wp_remote_get($url, [
-            'timeout' => 20,
-            'headers' => [
-                'User-Agent' => 'Suple Speed Warmup Test/1.0',
-                'X-Suple-Speed-Warmup' => '1'
-            ]
-        ]);
-        $duration = microtime(true) - $start;
-
-        if (is_wp_error($response)) {
-            wp_send_json_error($response->get_error_message());
-        }
-
-        $status_code = wp_remote_retrieve_response_code($response);
-
-        if ($status_code >= 400) {
-            wp_send_json_error(sprintf(__('Warmup request returned status code %d', 'suple-speed'), $status_code));
-        }
-
-        $final_stats = $cache_module->get_cache_stats();
-        $files_delta = max(0, (int) ($final_stats['total_files'] - $initial_stats['total_files']));
-        $size_delta = max(0, (int) ($final_stats['total_size'] - $initial_stats['total_size']));
-
-        $message = __('Cache warmup request completed successfully.', 'suple-speed');
-
-        wp_send_json_success([
-            'message' => $message,
-            'url' => $url,
-            'status_code' => $status_code,
-            'response_time' => round($duration, 3),
-            'files_generated' => $files_delta,
-            'bytes_cached' => $size_delta,
-            'stats' => $final_stats
         ]);
     }
 

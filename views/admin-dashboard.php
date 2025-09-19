@@ -186,6 +186,28 @@ $images_defaults = [
 ];
 $images_stats = wp_parse_args($dashboard_data['images_stats'] ?? [], $images_defaults);
 
+$cdn_defaults = [
+    'cloudflare' => [
+        'enabled' => false,
+        'api_token' => '',
+        'zone_id' => '',
+    ],
+    'bunnycdn' => [
+        'enabled' => false,
+        'api_key' => '',
+        'zone_id' => '',
+    ],
+];
+
+$cdn_settings = $current_settings['cdn_integrations'] ?? [];
+if (!is_array($cdn_settings)) {
+    $cdn_settings = [];
+}
+
+$cdn_settings = wp_parse_args($cdn_settings, $cdn_defaults);
+$cloudflare_cdn = wp_parse_args($cdn_settings['cloudflare'] ?? [], $cdn_defaults['cloudflare']);
+$bunnycdn_cdn = wp_parse_args($cdn_settings['bunnycdn'] ?? [], $cdn_defaults['bunnycdn']);
+
 $cache_module = function_exists('suple_speed') ? suple_speed()->cache : null;
 $logger_module = function_exists('suple_speed') ? suple_speed()->logger : null;
 $rules_module  = function_exists('suple_speed') ? suple_speed()->rules : null;
@@ -1314,6 +1336,73 @@ $onboarding_critical_labels = array_map(function($step) {
             </div>
 
             <div class="suple-card suple-mt-2">
+                <h3><?php _e('CDN Integrations', 'suple-speed'); ?></h3>
+                <p><?php _e('Store API credentials so Suple Speed can purge your CDN after clearing the local cache.', 'suple-speed'); ?></p>
+
+                <form id="suple-cdn-settings-form" class="suple-form suple-mt-1" autocomplete="off">
+                    <div class="suple-cdn-provider">
+                        <h4><?php _e('Cloudflare', 'suple-speed'); ?></h4>
+
+                        <div class="suple-form-row">
+                            <div class="suple-form-toggle">
+                                <div class="suple-toggle">
+                                    <input type="checkbox" id="cdn-cloudflare-enabled" name="cdn_cloudflare_enabled" <?php checked($cloudflare_cdn['enabled']); ?>>
+                                    <span class="suple-toggle-slider"></span>
+                                </div>
+                                <label for="cdn-cloudflare-enabled" class="suple-form-label"><?php _e('Enable Cloudflare purging', 'suple-speed'); ?></label>
+                            </div>
+                            <div class="suple-form-help"><?php _e('Trigger a Cloudflare cache purge whenever the local cache is cleared.', 'suple-speed'); ?></div>
+                        </div>
+
+                        <div class="suple-form-row">
+                            <label for="cdn-cloudflare-zone" class="suple-form-label"><?php _e('Zone ID', 'suple-speed'); ?></label>
+                            <input type="text" id="cdn-cloudflare-zone" name="cdn_cloudflare_zone_id" class="suple-form-input" value="<?php echo esc_attr($cloudflare_cdn['zone_id']); ?>" autocomplete="off">
+                            <div class="suple-form-help"><?php _e('Copy the Zone ID from your Cloudflare dashboard.', 'suple-speed'); ?></div>
+                        </div>
+
+                        <div class="suple-form-row">
+                            <label for="cdn-cloudflare-token" class="suple-form-label"><?php _e('API Token', 'suple-speed'); ?></label>
+                            <input type="password" id="cdn-cloudflare-token" name="cdn_cloudflare_api_token" class="suple-form-input" value="<?php echo esc_attr($cloudflare_cdn['api_token']); ?>" autocomplete="new-password">
+                            <div class="suple-form-help"><?php _e('Use a token with “Cache Purge” permissions.', 'suple-speed'); ?></div>
+                        </div>
+                    </div>
+
+                    <div class="suple-cdn-provider suple-mt-2">
+                        <h4><?php _e('BunnyCDN', 'suple-speed'); ?></h4>
+
+                        <div class="suple-form-row">
+                            <div class="suple-form-toggle">
+                                <div class="suple-toggle">
+                                    <input type="checkbox" id="cdn-bunny-enabled" name="cdn_bunnycdn_enabled" <?php checked($bunnycdn_cdn['enabled']); ?>>
+                                    <span class="suple-toggle-slider"></span>
+                                </div>
+                                <label for="cdn-bunny-enabled" class="suple-form-label"><?php _e('Enable BunnyCDN purging', 'suple-speed'); ?></label>
+                            </div>
+                            <div class="suple-form-help"><?php _e('Send purge requests to your BunnyCDN pull zone after local cache clears.', 'suple-speed'); ?></div>
+                        </div>
+
+                        <div class="suple-form-row">
+                            <label for="cdn-bunny-zone" class="suple-form-label"><?php _e('Pull Zone ID', 'suple-speed'); ?></label>
+                            <input type="text" id="cdn-bunny-zone" name="cdn_bunnycdn_zone_id" class="suple-form-input" value="<?php echo esc_attr($bunnycdn_cdn['zone_id']); ?>" autocomplete="off">
+                            <div class="suple-form-help"><?php _e('Enter the numeric ID or name of the pull zone to purge.', 'suple-speed'); ?></div>
+                        </div>
+
+                        <div class="suple-form-row">
+                            <label for="cdn-bunny-key" class="suple-form-label"><?php _e('API Key', 'suple-speed'); ?></label>
+                            <input type="password" id="cdn-bunny-key" name="cdn_bunnycdn_api_key" class="suple-form-input" value="<?php echo esc_attr($bunnycdn_cdn['api_key']); ?>" autocomplete="new-password">
+                            <div class="suple-form-help"><?php _e('Use the API Access Key from the BunnyCDN dashboard.', 'suple-speed'); ?></div>
+                        </div>
+                    </div>
+
+                    <div class="suple-button-group suple-mt-2">
+                        <button type="button" class="suple-button suple-save-cdn-settings">
+                            <?php _e('Save CDN Credentials', 'suple-speed'); ?>
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="suple-card suple-mt-2">
                 <h3><?php _e('Diagnostics', 'suple-speed'); ?></h3>
                 <p><?php _e('Use these helpers to verify that core services are working as expected.', 'suple-speed'); ?></p>
                 <div class="suple-button-group">
@@ -1692,3 +1781,11 @@ jQuery(document).ready(function($) {
     loadRecentActivity();
 });
 </script>
+.suple-cdn-provider + .suple-cdn-provider {
+    margin-top: 24px;
+}
+
+.suple-cdn-provider h4 {
+    margin-top: 0;
+}
+

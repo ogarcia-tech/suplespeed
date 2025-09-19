@@ -13,6 +13,8 @@ class Cache {
     private $settings;
     private $cache_dir;
     private $logger;
+    private $cdn;
+    private $last_cdn_results = [];
     private $static_resource_prefixes = [
         '/wp-content/uploads/',
         '/wp-content/cache/',
@@ -35,6 +37,7 @@ class Cache {
         
         if (function_exists('suple_speed')) {
             $this->logger = suple_speed()->logger;
+            $this->cdn = suple_speed()->cdn ?? null;
         }
         
         $this->init_hooks();
@@ -675,7 +678,7 @@ class Cache {
      */
     public function purge_all() {
         $files_deleted = 0;
-        
+
         if (is_dir($this->cache_dir)) {
             $files = glob($this->cache_dir . '*');
             
@@ -686,10 +689,13 @@ class Cache {
                 }
             }
         }
-        
+
         // Limpiar transients relacionados
         $this->clean_cache_transients();
-        
+
+        // Purga remota
+        $this->purge_cdn('all');
+
         // Log de purga
         if ($this->logger) {
             $this->logger->info('All cache purged', [
@@ -767,20 +773,33 @@ class Cache {
      */
     public function purge_urls($urls) {
         $purged_count = 0;
-        
+        $valid_urls = [];
+
         foreach ($urls as $url) {
-            $purged_count += $this->purge_url($url);
+            if (empty($url)) {
+                continue;
+            }
+
+            $purged_count += $this->purge_url($url, false);
+            $valid_urls[] = $url;
         }
-        
+
+        if (!empty($valid_urls)) {
+            $valid_urls = array_values(array_unique($valid_urls));
+            $this->purge_cdn('urls', $valid_urls);
+        } else {
+            $this->last_cdn_results = [];
+        }
+
         return $purged_count;
     }
-    
+
     /**
      * Purgar caché de una URL específica
      */
-    public function purge_url($url) {
+    public function purge_url($url, $trigger_cdn = true) {
         $purged_count = 0;
-        
+
         // Generar todas las posibles variaciones de caché para esta URL
         $cache_keys = $this->generate_cache_variations($url);
         
@@ -797,8 +816,46 @@ class Cache {
                 unlink($meta_file);
             }
         }
-        
+
+        if ($trigger_cdn && !empty($url)) {
+            $this->purge_cdn('urls', [$url]);
+        } elseif ($trigger_cdn) {
+            $this->last_cdn_results = [];
+        }
+
         return $purged_count;
+    }
+
+    /**
+     * Obtener últimos resultados de purga CDN
+     */
+    public function get_last_cdn_results() {
+        return array_values($this->last_cdn_results);
+    }
+
+    /**
+     * Ejecutar purga remota en CDN
+     */
+    private function purge_cdn($type, $urls = []) {
+        $this->last_cdn_results = [];
+
+        if (!$this->cdn) {
+            return;
+        }
+
+        if ($type !== 'all') {
+            $urls = array_filter((array) $urls);
+
+            if (empty($urls)) {
+                return;
+            }
+        }
+
+        $results = $this->cdn->purge($type, $urls);
+
+        if (is_array($results)) {
+            $this->last_cdn_results = $results;
+        }
     }
     
     /**
@@ -981,7 +1038,8 @@ class Cache {
         
         wp_send_json_success([
             'message' => sprintf('Cache purged successfully. %d files removed.', $purged_count),
-            'purged_count' => $purged_count
+            'purged_count' => $purged_count,
+            'cdn_results' => $this->get_last_cdn_results(),
         ]);
     }
     
@@ -1008,7 +1066,8 @@ class Cache {
         
         return new \WP_REST_Response([
             'success' => true,
-            'purged_count' => $result
+            'purged_count' => $result,
+            'cdn_results' => $this->get_last_cdn_results(),
         ], 200);
     }
     
