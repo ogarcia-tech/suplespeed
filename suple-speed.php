@@ -430,6 +430,13 @@ class SupleSpeed {
         add_option('suple_speed_rules', []);
         add_option('suple_speed_onboarding', []);
     }
+
+    /**
+     * Permite recrear las opciones por defecto desde otros componentes.
+     */
+    public function reset_default_options() {
+        $this->set_default_options();
+    }
     
     /**
      * Generar reglas de servidor

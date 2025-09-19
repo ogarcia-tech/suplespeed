@@ -725,7 +725,7 @@ class WP_CLI {
         
         // Recrear configuraciones por defecto
         if (function_exists('suple_speed')) {
-            suple_speed()->set_default_options();
+            suple_speed()->reset_default_options();
         }
         
         \WP_CLI::success('Settings reset to defaults');
