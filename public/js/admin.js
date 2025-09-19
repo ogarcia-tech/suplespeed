@@ -61,28 +61,64 @@
         initComponents: function() {
             // Inicializar tooltips
             this.initTooltips();
-            
+
             // Inicializar contadores en tiempo real
             this.initRealTimeUpdates();
-            
+
             // Inicializar drag & drop
             this.initDragDrop();
+
+            // Inicializar guía rápida
+            this.initOnboarding();
         },
 
         setupTabs: function() {
-            $('.suple-tab-nav a').on('click', function(e) {
-                e.preventDefault();
-                
-                const $this = $(this);
-                const targetTab = $this.attr('href');
-                
-                // Actualizar navegación
-                $this.closest('.suple-tab-nav').find('a').removeClass('active');
-                $this.addClass('active');
-                
-                // Mostrar contenido
+            const $tabNav = $('.suple-tab-nav');
+            if ($tabNav.length === 0) {
+                return;
+            }
+
+            const openTab = function(targetTab) {
+                if (!targetTab || targetTab.charAt(0) !== '#') {
+                    return;
+                }
+
+                const $target = $(targetTab);
+                if ($target.length === 0) {
+                    return;
+                }
+
+                $tabNav.find('a').removeClass('active');
+                $tabNav.find('a[href="' + targetTab + '"]').addClass('active');
+
                 $('.suple-tab-content').removeClass('active');
-                $(targetTab).addClass('active');
+                $target.addClass('active');
+            };
+
+            $tabNav.on('click', 'a', function(e) {
+                e.preventDefault();
+
+                const targetTab = $(this).attr('href');
+                openTab(targetTab);
+
+                if (history.replaceState) {
+                    const baseUrl = window.location.href.split('#')[0];
+                    history.replaceState(null, '', baseUrl + targetTab);
+                } else {
+                    window.location.hash = targetTab;
+                }
+            });
+
+            const initialHash = window.location.hash;
+            if (initialHash && $(initialHash).hasClass('suple-tab-content')) {
+                openTab(initialHash);
+            }
+
+            $(window).on('hashchange', function() {
+                const newHash = window.location.hash;
+                if (newHash && $(newHash).hasClass('suple-tab-content')) {
+                    openTab(newHash);
+                }
             });
         },
 
@@ -1237,6 +1273,104 @@
 
         updateRealTimeStats: function() {
             // TODO: Implementar actualización de estadísticas en tiempo real
+        },
+
+        initOnboarding: function() {
+            const $guide = $('.suple-onboarding');
+            if ($guide.length === 0) {
+                return;
+            }
+
+            $(document).on('change', '.suple-onboarding-step', function() {
+                const $checkbox = $(this);
+                const step = $checkbox.data('step');
+
+                if (!step) {
+                    return;
+                }
+
+                const completed = $checkbox.is(':checked');
+                const previousState = !completed;
+                const $card = $checkbox.closest('.suple-onboarding-card');
+                const $container = $card.closest('.suple-onboarding');
+
+                $card.toggleClass('completed', completed);
+                $card.addClass('loading');
+                $checkbox.prop('disabled', true);
+
+                SupleSpeedAdmin.ajaxRequest('update_onboarding', {
+                    step: step,
+                    completed: completed ? 1 : 0
+                }, function(data) {
+                    $checkbox.prop('disabled', false);
+                    $card.removeClass('loading');
+                    $card.toggleClass('completed', completed);
+
+                    if (data) {
+                        SupleSpeedAdmin.updateOnboardingProgress($container, data);
+                    }
+                }, function(error) {
+                    $checkbox.prop('disabled', false);
+                    $card.removeClass('loading');
+                    $checkbox.prop('checked', previousState);
+                    $card.toggleClass('completed', previousState);
+
+                    const errorMessage = (error && error.message)
+                        ? error.message
+                        : (typeof error === 'string' && error)
+                            ? error
+                            : (supleSpeedAdmin.strings && supleSpeedAdmin.strings.error) || 'An error occurred';
+
+                    SupleSpeedAdmin.showNotice('error', errorMessage);
+                });
+            });
+        },
+
+        updateOnboardingProgress: function($container, data) {
+            if (!$container || $container.length === 0) {
+                return;
+            }
+
+            const total = data.total || parseInt($container.attr('data-total'), 10) || 0;
+            const completed = data.completed || 0;
+            const progress = data.progress || 0;
+
+            $container.attr('data-total', total);
+            $container.attr('data-completed', completed);
+
+            const $count = $container.find('.suple-onboarding-progress-count');
+            if ($count.length) {
+                $count.text(completed + '/' + total);
+            }
+
+            const $progressFill = $container.find('.suple-onboarding-progress-bar-fill');
+            if ($progressFill.length) {
+                $progressFill.css('width', progress + '%');
+            }
+
+            const $progressLabel = $container.find('.suple-onboarding-progress-label');
+            if ($progressLabel.length) {
+                $progressLabel.text(progress + '%');
+            }
+
+            const $status = $container.find('.suple-onboarding-status');
+            if ($status.length) {
+                if (data.remaining_critical && data.remaining_critical.length > 0) {
+                    const template = $status.data('warning-template');
+                    const labels = (data.remaining_labels && data.remaining_labels.length > 0)
+                        ? data.remaining_labels.join(', ')
+                        : data.remaining_critical.join(', ');
+
+                    const message = template
+                        ? template.replace('%1$s', data.remaining_critical.length).replace('%2$s', labels)
+                        : labels;
+
+                    $status.removeClass('success').addClass('warning').text(message);
+                } else {
+                    const successText = $status.data('success-text') || '';
+                    $status.removeClass('warning').addClass('success').text(successText);
+                }
+            }
         },
 
         initDragDrop: function() {
