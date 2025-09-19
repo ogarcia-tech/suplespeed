@@ -331,12 +331,29 @@ class SupleSpeed {
     public static function uninstall() {
         // Limpiar opciones
         delete_option('suple_speed_settings');
+        global $wpdb;
+
         delete_option('suple_speed_rules');
         delete_option('suple_speed_psi_data');
         delete_option('suple_speed_version');
-        
+        delete_option('suple_speed_onboarding');
+
+        // Limpiar cualquier otro estado de onboarding almacenado
+        $onboarding_like = $wpdb->esc_like('suple_speed_onboarding_') . '%';
+        $wpdb->query(
+            $wpdb->prepare(
+                "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
+                $onboarding_like
+            )
+        );
+        $wpdb->query(
+            $wpdb->prepare(
+                "DELETE FROM {$wpdb->usermeta} WHERE meta_key LIKE %s",
+                $onboarding_like
+            )
+        );
+
         // Limpiar transients
-        global $wpdb;
         $wpdb->query("DELETE FROM {$wpdb->options} WHERE option_name LIKE '_transient_suple_speed_%'");
         $wpdb->query("DELETE FROM {$wpdb->options} WHERE option_name LIKE '_transient_timeout_suple_speed_%'");
         
