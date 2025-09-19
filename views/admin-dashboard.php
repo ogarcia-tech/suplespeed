@@ -68,6 +68,10 @@ $tabs = [
         'label' => __('Compatibility', 'suple-speed'),
         'icon'  => 'dashicons-yes-alt',
     ],
+    'database' => [
+        'label' => __('Database', 'suple-speed'),
+        'icon'  => 'dashicons-database',
+    ],
     'tools' => [
         'label' => __('Tools', 'suple-speed'),
         'icon'  => 'dashicons-admin-tools',
@@ -186,27 +190,26 @@ $images_defaults = [
 ];
 $images_stats = wp_parse_args($dashboard_data['images_stats'] ?? [], $images_defaults);
 
-$cdn_defaults = [
-    'cloudflare' => [
-        'enabled' => false,
-        'api_token' => '',
-        'zone_id' => '',
-    ],
-    'bunnycdn' => [
-        'enabled' => false,
-        'api_key' => '',
-        'zone_id' => '',
-    ],
+$database_defaults = [
+    'total_revisions'             => 0,
+    'expired_transients'          => 0,
+    'total_transients'            => 0,
+    'database_size'               => 0,
+    'database_size_formatted'     => size_format(0),
+    'overhead'                    => 0,
+    'overhead_formatted'          => size_format(0),
+    'total_tables'                => 0,
+    'tables_needing_optimization' => 0,
+    'tables'                      => [],
+    'last_revision_cleanup'       => 0,
+    'last_revision_cleanup_human' => null,
+    'last_transients_cleanup'     => 0,
+    'last_transients_cleanup_human' => null,
+    'last_optimization'           => 0,
+    'last_optimization_human'     => null,
 ];
+$database_stats = wp_parse_args($dashboard_data['database_stats'] ?? [], $database_defaults);
 
-$cdn_settings = $current_settings['cdn_integrations'] ?? [];
-if (!is_array($cdn_settings)) {
-    $cdn_settings = [];
-}
-
-$cdn_settings = wp_parse_args($cdn_settings, $cdn_defaults);
-$cloudflare_cdn = wp_parse_args($cdn_settings['cloudflare'] ?? [], $cdn_defaults['cloudflare']);
-$bunnycdn_cdn = wp_parse_args($cdn_settings['bunnycdn'] ?? [], $cdn_defaults['bunnycdn']);
 
 $cache_module = function_exists('suple_speed') ? suple_speed()->cache : null;
 $logger_module = function_exists('suple_speed') ? suple_speed()->logger : null;
@@ -443,7 +446,12 @@ $onboarding_critical_labels = array_map(function($step) {
             <span class="suple-stat-label"><?php _e('Avg Score (Mobile)', 'suple-speed'); ?></span>
         </div>
         <?php endif; ?>
-        
+
+        <div class="suple-stat-card">
+            <span class="suple-stat-value database-size-value"><?php echo esc_html($database_stats['database_size_formatted']); ?></span>
+            <span class="suple-stat-label"><?php _e('DB Size', 'suple-speed'); ?></span>
+        </div>
+
     </div>
 
 
@@ -487,6 +495,11 @@ $onboarding_critical_labels = array_map(function($step) {
                         <span class="suple-stat-label"><?php _e('Avg Score (Mobile)', 'suple-speed'); ?></span>
                     </div>
                 <?php endif; ?>
+
+                <div class="suple-stat-card">
+                    <span class="suple-stat-value database-size-value"><?php echo esc_html($database_stats['database_size_formatted']); ?></span>
+                    <span class="suple-stat-label"><?php _e('DB Size', 'suple-speed'); ?></span>
+                </div>
             </div>
 
             <div class="suple-grid suple-grid-2">
@@ -618,6 +631,87 @@ $onboarding_critical_labels = array_map(function($step) {
                                     </button>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+
+                    <div class="suple-card suple-database-summary">
+                        <h3><?php _e('Database Health', 'suple-speed'); ?></h3>
+                        <div class="suple-stats">
+                            <div class="suple-stat-card">
+                                <span class="suple-stat-value database-total-revisions"><?php echo esc_html(number_format_i18n((int) $database_stats['total_revisions'])); ?></span>
+                                <span class="suple-stat-label"><?php _e('Post Revisions', 'suple-speed'); ?></span>
+                            </div>
+                            <div class="suple-stat-card">
+                                <span class="suple-stat-value database-expired-transients"><?php echo esc_html(number_format_i18n((int) $database_stats['expired_transients'])); ?></span>
+                                <span class="suple-stat-label"><?php _e('Expired Transients', 'suple-speed'); ?></span>
+                            </div>
+                            <div class="suple-stat-card">
+                                <span class="suple-stat-value database-tables-needing-optimization"><?php echo esc_html(number_format_i18n((int) $database_stats['tables_needing_optimization'])); ?></span>
+                                <span class="suple-stat-label"><?php _e('Tables w/ Overhead', 'suple-speed'); ?></span>
+                            </div>
+                        </div>
+                        <p class="suple-text-muted database-optimization-status">
+                            <?php
+                            echo wp_kses_post(
+                                sprintf(
+                                    __('Tables needing optimization: %1$s of %2$s', 'suple-speed'),
+                                    '<strong class="database-tables-needing-optimization">' . esc_html(number_format_i18n((int) $database_stats['tables_needing_optimization'])) . '</strong>',
+                                    '<span class="database-total-tables">' . esc_html(number_format_i18n((int) $database_stats['total_tables'])) . '</span>'
+                                )
+                            );
+                            ?>
+                        </p>
+                        <ul class="suple-database-meta">
+                            <li>
+                                <strong><?php _e('Last revision cleanup', 'suple-speed'); ?>:</strong>
+                                <span class="database-last-revision">
+                                    <?php
+                                    if (!empty($database_stats['last_revision_cleanup_human'])) {
+                                        printf(
+                                            esc_html__('%s ago', 'suple-speed'),
+                                            esc_html($database_stats['last_revision_cleanup_human'])
+                                        );
+                                    } else {
+                                        esc_html_e('Never', 'suple-speed');
+                                    }
+                                    ?>
+                                </span>
+                            </li>
+                            <li>
+                                <strong><?php _e('Last transient cleanup', 'suple-speed'); ?>:</strong>
+                                <span class="database-last-transients">
+                                    <?php
+                                    if (!empty($database_stats['last_transients_cleanup_human'])) {
+                                        printf(
+                                            esc_html__('%s ago', 'suple-speed'),
+                                            esc_html($database_stats['last_transients_cleanup_human'])
+                                        );
+                                    } else {
+                                        esc_html_e('Never', 'suple-speed');
+                                    }
+                                    ?>
+                                </span>
+                            </li>
+                            <li>
+                                <strong><?php _e('Last optimization', 'suple-speed'); ?>:</strong>
+                                <span class="database-last-optimization">
+                                    <?php
+                                    if (!empty($database_stats['last_optimization_human'])) {
+                                        printf(
+                                            esc_html__('%s ago', 'suple-speed'),
+                                            esc_html($database_stats['last_optimization_human'])
+                                        );
+                                    } else {
+                                        esc_html_e('Never', 'suple-speed');
+                                    }
+                                    ?>
+                                </span>
+                            </li>
+                        </ul>
+                        <div class="suple-button-group suple-mt-1">
+                            <a href="<?php echo esc_url($dashboard_link('database')); ?>" class="suple-button secondary suple-open-tab" data-tab="database">
+                                <?php _e('Open Database Tools', 'suple-speed'); ?>
+                            </a>
                         </div>
                     </div>
 
@@ -1289,6 +1383,167 @@ $onboarding_critical_labels = array_map(function($step) {
             </div>
         </div>
 
+        <!-- Database Tab -->
+        <div class="suple-tab-panel <?php echo $active_tab === 'database' ? 'is-active' : ''; ?>" data-tab="database">
+            <div class="suple-grid suple-grid-2 suple-mt-2">
+                <div class="suple-card">
+                    <h3><?php _e('Database Summary', 'suple-speed'); ?></h3>
+                    <div class="suple-stats suple-database-stats">
+                        <div class="suple-stat-card">
+                            <span class="suple-stat-value database-total-revisions"><?php echo esc_html(number_format_i18n((int) $database_stats['total_revisions'])); ?></span>
+                            <span class="suple-stat-label"><?php _e('Post Revisions', 'suple-speed'); ?></span>
+                        </div>
+                        <div class="suple-stat-card">
+                            <span class="suple-stat-value database-expired-transients"><?php echo esc_html(number_format_i18n((int) $database_stats['expired_transients'])); ?></span>
+                            <span class="suple-stat-label"><?php _e('Expired Transients', 'suple-speed'); ?></span>
+                        </div>
+                        <div class="suple-stat-card">
+                            <span class="suple-stat-value database-size-value"><?php echo esc_html($database_stats['database_size_formatted']); ?></span>
+                            <span class="suple-stat-label"><?php _e('Database Size', 'suple-speed'); ?></span>
+                        </div>
+                        <div class="suple-stat-card">
+                            <span class="suple-stat-value database-overhead"><?php echo esc_html($database_stats['overhead_formatted']); ?></span>
+                            <span class="suple-stat-label"><?php _e('Overhead', 'suple-speed'); ?></span>
+                        </div>
+                    </div>
+                    <p class="suple-text-muted database-optimization-status">
+                        <?php
+                        echo wp_kses_post(
+                            sprintf(
+                                __('Tables needing optimization: %1$s of %2$s', 'suple-speed'),
+                                '<strong class="database-tables-needing-optimization">' . esc_html(number_format_i18n((int) $database_stats['tables_needing_optimization'])) . '</strong>',
+                                '<span class="database-total-tables">' . esc_html(number_format_i18n((int) $database_stats['total_tables'])) . '</span>'
+                            )
+                        );
+                        ?>
+                    </p>
+                    <ul class="suple-database-meta">
+                        <li>
+                            <strong><?php _e('Last revision cleanup', 'suple-speed'); ?>:</strong>
+                            <span class="database-last-revision">
+                                <?php
+                                if (!empty($database_stats['last_revision_cleanup_human'])) {
+                                    printf(
+                                        esc_html__('%s ago', 'suple-speed'),
+                                        esc_html($database_stats['last_revision_cleanup_human'])
+                                    );
+                                } else {
+                                    esc_html_e('Never', 'suple-speed');
+                                }
+                                ?>
+                            </span>
+                        </li>
+                        <li>
+                            <strong><?php _e('Last transient cleanup', 'suple-speed'); ?>:</strong>
+                            <span class="database-last-transients">
+                                <?php
+                                if (!empty($database_stats['last_transients_cleanup_human'])) {
+                                    printf(
+                                        esc_html__('%s ago', 'suple-speed'),
+                                        esc_html($database_stats['last_transients_cleanup_human'])
+                                    );
+                                } else {
+                                    esc_html_e('Never', 'suple-speed');
+                                }
+                                ?>
+                            </span>
+                        </li>
+                        <li>
+                            <strong><?php _e('Last optimization', 'suple-speed'); ?>:</strong>
+                            <span class="database-last-optimization">
+                                <?php
+                                if (!empty($database_stats['last_optimization_human'])) {
+                                    printf(
+                                        esc_html__('%s ago', 'suple-speed'),
+                                        esc_html($database_stats['last_optimization_human'])
+                                    );
+                                } else {
+                                    esc_html_e('Never', 'suple-speed');
+                                }
+                                ?>
+                            </span>
+                        </li>
+                    </ul>
+                </div>
+                <div class="suple-card">
+                    <h3><?php _e('Maintenance Actions', 'suple-speed'); ?></h3>
+                    <div class="suple-maintenance-warning">
+                        <strong><?php _e('Important', 'suple-speed'); ?></strong>
+                        <?php _e('Always back up your database before running cleanup operations.', 'suple-speed'); ?>
+                    </div>
+                    <div class="suple-maintenance-actions">
+                        <div class="suple-maintenance-action">
+                            <div>
+                                <h4><?php _e('Delete Post Revisions', 'suple-speed'); ?></h4>
+                                <p class="suple-text-muted"><?php _e('Remove stored revisions to reduce database size and keep content history lean.', 'suple-speed'); ?></p>
+                            </div>
+                            <button type="button" class="suple-button secondary suple-clean-revisions">
+                                <span class="dashicons dashicons-editor-paste-text"></span>
+                                <?php _e('Clean Revisions', 'suple-speed'); ?>
+                            </button>
+                        </div>
+                        <div class="suple-maintenance-action">
+                            <div>
+                                <h4><?php _e('Clear Expired Transients', 'suple-speed'); ?></h4>
+                                <p class="suple-text-muted"><?php _e('Delete cached entries that have expired to free up options table space.', 'suple-speed'); ?></p>
+                            </div>
+                            <button type="button" class="suple-button secondary suple-clean-transients">
+                                <span class="dashicons dashicons-clock"></span>
+                                <?php _e('Clean Transients', 'suple-speed'); ?>
+                            </button>
+                        </div>
+                        <div class="suple-maintenance-action">
+                            <div>
+                                <h4><?php _e('Optimize Tables', 'suple-speed'); ?></h4>
+                                <p class="suple-text-muted"><?php _e('Run OPTIMIZE TABLE on WordPress tables that report overhead.', 'suple-speed'); ?></p>
+                            </div>
+                            <button type="button" class="suple-button suple-optimize-tables" data-scope="overhead">
+                                <span class="dashicons dashicons-database"></span>
+                                <?php _e('Optimize Tables', 'suple-speed'); ?>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="suple-card suple-mt-2">
+                <h3><?php _e('Top WordPress Tables', 'suple-speed'); ?></h3>
+                <table class="suple-table suple-database-table">
+                    <thead>
+                        <tr>
+                            <th><?php _e('Table', 'suple-speed'); ?></th>
+                            <th><?php _e('Rows', 'suple-speed'); ?></th>
+                            <th><?php _e('Size', 'suple-speed'); ?></th>
+                            <th><?php _e('Overhead', 'suple-speed'); ?></th>
+                            <th><?php _e('Engine', 'suple-speed'); ?></th>
+                        </tr>
+                    </thead>
+                    <tbody id="suple-database-table-body">
+                        <?php if (!empty($database_stats['tables'])): ?>
+                            <?php foreach ($database_stats['tables'] as $table): ?>
+                                <tr>
+                                    <td>
+                                        <?php echo esc_html($table['name']); ?>
+                                        <?php if (!empty($table['needs_optimization'])): ?>
+                                            <span class="suple-badge warning"><?php _e('Needs attention', 'suple-speed'); ?></span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td><?php echo esc_html(number_format_i18n((int) ($table['rows'] ?? 0))); ?></td>
+                                    <td><?php echo esc_html($table['size_formatted']); ?></td>
+                                    <td><?php echo !empty($table['overhead']) ? esc_html($table['overhead_formatted']) : '&mdash;'; ?></td>
+                                    <td><?php echo esc_html($table['engine']); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <tr>
+                                <td colspan="5" class="suple-text-muted database-empty-message"><?php _e('No table information available.', 'suple-speed'); ?></td>
+                            </tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- Tools Tab -->
         <div class="suple-tab-panel <?php echo $active_tab === 'tools' ? 'is-active' : ''; ?>" data-tab="tools">
             <div class="suple-grid suple-grid-2 suple-mt-2">
@@ -1702,6 +1957,78 @@ $onboarding_critical_labels = array_map(function($step) {
 .suple-onboarding-links a::after {
     content: '\2192';
     margin-left: 4px;
+}
+
+.suple-database-summary .suple-stat-card {
+    min-width: 140px;
+}
+
+.suple-database-meta {
+    list-style: none;
+    margin: 16px 0 0 0;
+    padding: 0;
+    display: grid;
+    gap: 6px;
+}
+
+.suple-database-meta li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    color: var(--suple-text-light);
+}
+
+.suple-database-meta strong {
+    color: var(--suple-text);
+}
+
+.suple-maintenance-warning {
+    background: #fff8e5;
+    border-left: 4px solid #ffb900;
+    border-radius: var(--suple-radius);
+    padding: 12px 16px;
+    margin-bottom: 18px;
+    color: var(--suple-text);
+}
+
+.suple-maintenance-warning strong {
+    display: block;
+    margin-bottom: 6px;
+}
+
+.suple-maintenance-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.suple-maintenance-action {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    border: 1px solid var(--suple-border);
+    border-radius: var(--suple-radius);
+    padding: 16px;
+    background: #fff;
+}
+
+.suple-maintenance-action h4 {
+    margin: 0 0 6px 0;
+    font-size: 15px;
+}
+
+.suple-maintenance-action p {
+    margin: 0;
+}
+
+.suple-maintenance-action .suple-button {
+    white-space: nowrap;
+}
+
+.database-empty-message {
+    text-align: center;
 }
 
 .suple-onboarding-card .suple-badge {
