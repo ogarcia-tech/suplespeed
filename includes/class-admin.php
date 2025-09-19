@@ -408,6 +408,7 @@ class Admin {
                 'manual' => __('Manual', 'suple-speed'),
                 'auto' => __('Automatic', 'suple-speed'),
                 'noHandles' => __('No handles available yet.', 'suple-speed'),
+                'noHandlesDetected' => __('No handles detected yet.', 'suple-speed'),
                 'noBundles' => __('No bundles have been generated yet. They will appear here after the next optimization run.', 'suple-speed'),
                 'bundlesType' => __('Type', 'suple-speed'),
                 'bundlesGroup' => __('Group', 'suple-speed'),
@@ -423,6 +424,8 @@ class Admin {
                 'confirmReset' => __('Are you sure you want to reset all settings?', 'suple-speed'),
                 'confirmPurge' => __('Are you sure you want to purge all cache?', 'suple-speed'),
                 'processing' => __('Processing...', 'suple-speed'),
+                'scanningHandles' => __('Scanning handles…', 'suple-speed'),
+                'scanHandlesError' => __('We could not retrieve the handles for this page.', 'suple-speed'),
                 'success' => __('Operation completed successfully', 'suple-speed'),
                 'error' => __('An error occurred', 'suple-speed')
             ]
