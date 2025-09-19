@@ -134,6 +134,8 @@ $current_settings = $this->get_current_settings();
                                min="1" max="168" class="suple-form-input">
                         <div class="suple-form-help">
                             <?php _e('How long to keep cached pages before regenerating them.', 'suple-speed'); ?>
+                            <br>
+                            <?php _e('When server rules cannot be written, Suple Speed will automatically apply Cache-Control, Expires and ETag headers to local static files using this lifetime as fallback.', 'suple-speed'); ?>
                         </div>
                     </div>
 
@@ -303,12 +305,26 @@ $current_settings = $this->get_current_settings();
                         </div>
                     </div>
 
+                    <!-- Font Display Swap -->
+                    <div class="suple-form-row">
+                        <div class="suple-form-toggle">
+                            <div class="suple-toggle">
+                                <input type="checkbox" id="fonts_display_swap" name="fonts_display_swap" <?php checked($current_settings['fonts_display_swap'] ?? true); ?>>
+                                <span class="suple-toggle-slider"></span>
+                            </div>
+                            <label for="fonts_display_swap" class="suple-form-label"><?php _e('Add font-display: swap to local fonts', 'suple-speed'); ?></label>
+                        </div>
+                        <div class="suple-form-help">
+                            <?php _e('Automatically append font-display: swap to @font-face rules that serve fonts from your domain. Disable if this conflicts with custom styling.', 'suple-speed'); ?>
+                        </div>
+                    </div>
+
                     <!-- Font Display -->
                     <div class="suple-form-row">
                         <div class="suple-notice info">
                             <p>
                                 <strong><?php _e('Font Display Optimization', 'suple-speed'); ?></strong><br>
-                                <?php _e('Suple Speed automatically adds font-display: swap to all fonts for better loading performance.', 'suple-speed'); ?>
+                                <?php _e('Ensures text stays visible while local webfonts load by leveraging the font-display property.', 'suple-speed'); ?>
                             </p>
                         </div>
                     </div>
@@ -438,11 +454,11 @@ $current_settings = $this->get_current_settings();
                             <?php
                             $css_groups = ['A' => 'Core & Theme', 'B' => 'Plugins', 'C' => 'Elementor', 'D' => 'Third Party'];
                             $selected_css_groups = $current_settings['assets_merge_css_groups'] ?? ['A', 'B'];
-                            
+
                             foreach ($css_groups as $group => $label):
                             ?>
                             <label class="suple-form-toggle">
-                                <input type="checkbox" name="assets_merge_css_groups[]" value="<?php echo esc_attr($group); ?>" 
+                                <input type="checkbox" name="assets_merge_css_groups[]" value="<?php echo esc_attr($group); ?>"
                                        <?php checked(in_array($group, $selected_css_groups)); ?>>
                                 <span><?php printf(__('Group %s: %s', 'suple-speed'), $group, $label); ?></span>
                             </label>
@@ -450,6 +466,27 @@ $current_settings = $this->get_current_settings();
                         </div>
                         <div class="suple-form-help">
                             <?php _e('Select which asset groups to merge together. Group C (Elementor) should be handled carefully.', 'suple-speed'); ?>
+                        </div>
+                    </div>
+
+                    <!-- Asynchronous CSS Groups -->
+                    <div class="suple-form-row">
+                        <label class="suple-form-label"><?php _e('Async CSS Groups', 'suple-speed'); ?></label>
+                        <div class="suple-checkbox-group">
+                            <?php
+                            $async_css_groups = $current_settings['assets_async_css_groups'] ?? [];
+
+                            foreach ($css_groups as $group => $label):
+                            ?>
+                            <label class="suple-form-toggle">
+                                <input type="checkbox" name="assets_async_css_groups[]" value="<?php echo esc_attr($group); ?>"
+                                       <?php checked(in_array($group, $async_css_groups)); ?>>
+                                <span><?php printf(__('Load Group %s (%s) asynchronously', 'suple-speed'), $group, $label); ?></span>
+                            </label>
+                            <?php endforeach; ?>
+                        </div>
+                        <div class="suple-form-help">
+                            <?php _e('Selected groups will use <link rel="preload"> + onload to avoid render blocking. Leave critical groups unchecked.', 'suple-speed'); ?>
                         </div>
                     </div>
 

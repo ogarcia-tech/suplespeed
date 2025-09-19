@@ -216,7 +216,7 @@ class Admin {
         $boolean_settings = [
             'cache_enabled', 'compression_enabled', 'assets_enabled',
             'merge_css', 'merge_js', 'minify_css', 'minify_js', 'defer_js',
-            'critical_css_enabled', 'fonts_local', 'images_lazy', 'images_lqip',
+            'critical_css_enabled', 'fonts_local', 'fonts_display_swap', 'images_lazy', 'images_lqip',
             'images_webp_rewrite', 'elementor_compat', 'safe_mode',
             'multisite_network', 'assets_test_mode', 'psi_auto_test'
         ];
@@ -253,6 +253,7 @@ class Admin {
         $array_settings = [
             'cache_exclude_params', 'assets_exclude_handles', 
             'assets_no_defer_handles', 'assets_merge_css_groups',
+            'assets_async_css_groups',
             'assets_merge_js_groups', 'cache_vary_cookies',
             'assets_test_roles', 'assets_test_ips', 'preload_assets',
             'fonts_preload', 'images_preload'
@@ -262,12 +263,21 @@ class Admin {
             $sanitized[$setting] = isset($input[$setting]) && is_array($input[$setting]) ?
                                    array_map('sanitize_text_field', $input[$setting]) :
                                    [];
+
+            if ($setting === 'assets_async_css_groups') {
+                $sanitized[$setting] = array_values(array_unique(array_intersect(
+                    ['A', 'B', 'C', 'D'],
+                    array_map('strtoupper', $sanitized[$setting])
+                )));
+            }
         }
+
         
         // Campos de textarea
         $sanitized['images_critical_manual'] = isset($input['images_critical_manual']) ?
             sanitize_textarea_field($input['images_critical_manual']) :
             '';
+
 
         return $sanitized;
     }

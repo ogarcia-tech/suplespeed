@@ -26,7 +26,11 @@ class Fonts {
         $this->settings = get_option('suple_speed_settings', []);
         $this->fonts_dir = SUPLE_SPEED_UPLOADS_DIR . 'fonts/';
         $this->fonts_url = str_replace(ABSPATH, home_url('/'), $this->fonts_dir);
-        
+
+        $this->settings['fonts_display_swap'] = isset($this->settings['fonts_display_swap'])
+            ? (bool) $this->settings['fonts_display_swap']
+            : true;
+
         if (function_exists('suple_speed')) {
             $this->logger = suple_speed()->logger;
         }
@@ -112,15 +116,158 @@ class Fonts {
             [$this, 'replace_google_font_link'],
             $html
         );
-        
+
         // Buscar @import en CSS inline
         $html = preg_replace_callback(
             '/@import\s+(?:url\()?["\']?([^"\'\)]*fonts\.googleapis\.com[^"\'\)]*)["\']?\)?;?/i',
             [$this, 'replace_google_font_import'],
             $html
         );
-        
+
+        if ($this->is_font_display_swap_enabled()) {
+            $html = preg_replace_callback(
+                '/(<style\b[^>]*>)(.*?)(<\/style>)/is',
+                function($matches) {
+                    $result = $this->enforce_font_display_swap($matches[2], 'inline_style');
+
+                    if (!is_array($result) || empty($result['adjusted'])) {
+                        return $matches[0];
+                    }
+
+                    return $matches[1] . $result['css'] . $matches[3];
+                },
+                $html
+            );
+        }
+
         return $html;
+    }
+
+    /**
+     * Asegurar font-display: swap en CSS dado
+     */
+    public function enforce_font_display_swap($css, $context = 'assets') {
+        if (!$this->is_font_display_swap_enabled() || empty($css) || !is_string($css)) {
+            return ['css' => $css, 'adjusted' => 0];
+        }
+
+        $site_host = parse_url(home_url(), PHP_URL_HOST);
+
+        if (empty($site_host)) {
+            return ['css' => $css, 'adjusted' => 0];
+        }
+
+        $adjusted_blocks = 0;
+        $processed_css = preg_replace_callback(
+            '/@font-face\s*{[^{}]*}/i',
+            function($matches) use (&$adjusted_blocks, $site_host) {
+                $block = $matches[0];
+
+                if (!$this->font_face_contains_local_source($block, $site_host)) {
+                    return $block;
+                }
+
+                if (preg_match('/font-display\s*:/i', $block)) {
+                    return $block;
+                }
+
+                $adjusted_blocks++;
+
+                return $this->inject_font_display_swap($block);
+            },
+            $css
+        );
+
+        if ($processed_css === null) {
+            $processed_css = $css;
+        }
+
+        if ($adjusted_blocks > 0 && $this->logger) {
+            $this->logger->info('font-display: swap enforced on local fonts', [
+                'context' => $context,
+                'blocks_adjusted' => $adjusted_blocks
+            ], 'fonts');
+        }
+
+        return [
+            'css' => $processed_css,
+            'adjusted' => $adjusted_blocks
+        ];
+    }
+
+    /**
+     * Verificar si font-display swap está habilitado
+     */
+    private function is_font_display_swap_enabled() {
+        return !empty($this->settings['fonts_display_swap']);
+    }
+
+    /**
+     * Verificar si un bloque @font-face usa fuentes locales
+     */
+    private function font_face_contains_local_source($font_face_block, $site_host) {
+        if (!preg_match('/src\s*:\s*([^;]+);?/i', $font_face_block, $src_match)) {
+            return false;
+        }
+
+        $src_value = $src_match[1];
+
+        if (!preg_match_all('/url\(([^)]+)\)/i', $src_value, $url_matches)) {
+            return false;
+        }
+
+        foreach ($url_matches[1] as $url_candidate) {
+            $url_candidate = trim($url_candidate, "\"' \t\n\r\0\x0B");
+
+            if ($url_candidate === '') {
+                continue;
+            }
+
+            if ($this->is_local_font_url($url_candidate, $site_host)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Determinar si la URL apunta al dominio actual
+     */
+    private function is_local_font_url($url, $site_host) {
+        if (strpos($url, 'data:') === 0) {
+            return false;
+        }
+
+        if (strpos($url, '//') === 0) {
+            $parsed_host = parse_url('https:' . $url, PHP_URL_HOST);
+            return !empty($parsed_host) && $parsed_host === $site_host;
+        }
+
+        if (preg_match('#^[a-z][a-z0-9+\-.]*:#i', $url)) {
+            if (!preg_match('#^https?://#i', $url)) {
+                return false;
+            }
+
+            $parsed_host = parse_url($url, PHP_URL_HOST);
+            return !empty($parsed_host) && $parsed_host === $site_host;
+        }
+
+        // Sin esquema, se asume que es una ruta local
+        return true;
+    }
+
+    /**
+     * Insertar font-display: swap en un bloque @font-face
+     */
+    private function inject_font_display_swap($font_face_block) {
+        if (preg_match('/;\s*}\s*$/', $font_face_block)) {
+            $replacement = preg_replace('/;\s*}\s*$/', '; font-display: swap;}', $font_face_block, 1);
+        } else {
+            $replacement = preg_replace('/}\s*$/', '; font-display: swap;}', $font_face_block, 1);
+        }
+
+        return $replacement !== null ? $replacement : $font_face_block;
     }
     
     /**

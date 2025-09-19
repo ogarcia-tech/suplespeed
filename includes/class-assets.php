@@ -31,6 +31,8 @@ class Assets {
     private $processed_handles = [];
     private $excluded_handles = [];
     private $dependency_map = [];
+    private $async_css_groups = [];
+    private $style_filter_registered = false;
     
     public function __construct() {
         $this->settings = get_option('suple_speed_settings', []);
@@ -40,7 +42,9 @@ class Assets {
         if (function_exists('suple_speed')) {
             $this->logger = suple_speed()->logger;
         }
-        
+
+        $this->async_css_groups = array_map('strtoupper', $this->settings['assets_async_css_groups'] ?? []);
+
         $this->init_hooks();
         $this->load_excluded_handles();
     }
@@ -52,7 +56,7 @@ class Assets {
         // Solo en frontend y fuera del editor de Elementor
         if (!is_admin() && !$this->is_editor_mode()) {
             add_action('wp_enqueue_scripts', [$this, 'optimize_scripts_styles'], 999);
-            add_action('wp_head', [$this, 'inject_critical_css'], 1);
+            add_action('wp_head', [$this, 'inject_critical_css'], 0);
             add_action('wp_head', [$this, 'inject_preloads'], 2);
             
             // Filtros para modificar output
@@ -391,7 +395,15 @@ class Assets {
                     [],
                     $merged_file['version']
                 );
+
+                if (!empty($this->async_css_groups)) {
+                    $this->ensure_async_style_filter();
+                }
             }
+        }
+
+        if (!empty($this->async_css_groups)) {
+            $this->log_async_manual_tests();
         }
     }
     
@@ -440,10 +452,25 @@ class Assets {
         if (!empty($merged_content)) {
             // Optimizaciones finales
             $merged_content = $this->optimize_final_css($merged_content);
-            
+
+            if (function_exists('suple_speed')) {
+                $fonts_module = suple_speed()->fonts ?? null;
+
+                if ($fonts_module && method_exists($fonts_module, 'enforce_font_display_swap')) {
+                    $result = $fonts_module->enforce_font_display_swap(
+                        $merged_content,
+                        'merged_css_' . strtolower($group)
+                    );
+
+                    if (is_array($result) && isset($result['css'])) {
+                        $merged_content = $result['css'];
+                    }
+                }
+            }
+
             // Guardar archivo
             $bytes_written = file_put_contents($merged_file, $merged_content);
-            
+
             if ($bytes_written !== false) {
                 // Guardar metadatos
                 $this->save_merge_metadata($merged_file, [
@@ -945,15 +972,106 @@ class Assets {
             'url' => $this->get_current_url(),
             'post_id' => get_the_ID()
         ]);
-        
+
         // Si no hay CSS específico, usar el general
         if (empty($critical_css)) {
             $critical_css = $this->settings['critical_css_general'] ?? '';
         }
-        
+
         return $critical_css;
     }
-    
+
+    /**
+     * Registrar filtro para precarga de estilos
+     */
+    private function ensure_async_style_filter() {
+        if ($this->style_filter_registered) {
+            return;
+        }
+
+        add_filter('style_loader_tag', [$this, 'filter_style_loader_tag'], 10, 4);
+        $this->style_filter_registered = true;
+    }
+
+    /**
+     * Convertir enlaces de estilos en precarga asincrónica
+     */
+    public function filter_style_loader_tag($html, $handle, $href, $media) {
+        if (empty($this->async_css_groups) || empty($href)) {
+            return $html;
+        }
+
+        if (in_array($handle, $this->excluded_handles, true)) {
+            return $html;
+        }
+
+        $group = $this->get_group_from_handle($handle);
+
+        if (!$group || !in_array($group, $this->async_css_groups, true)) {
+            return $html;
+        }
+
+        $this->log_async_manual_tests();
+
+        $media_attr = '';
+        if (!empty($media) && $media !== 'all') {
+            $media_attr = ' media="' . esc_attr($media) . '"';
+        }
+
+        $id_attr = ' id="' . esc_attr($handle) . '-css"';
+        $preload_tag = '<link rel="preload" as="style" href="' . esc_url($href) . '"' . $id_attr . $media_attr . ' onload="this.rel=\'stylesheet\';this.removeAttribute(\'onload\');">';
+        $noscript_tag = '<noscript><link rel="stylesheet" href="' . esc_url($href) . '"' . $id_attr . $media_attr . '></noscript>';
+
+        return $preload_tag . "\n" . $noscript_tag;
+    }
+
+    /**
+     * Obtener grupo a partir del handle fusionado
+     */
+    private function get_group_from_handle($handle) {
+        if (strpos($handle, 'suple-speed-css-') !== 0) {
+            return null;
+        }
+
+        $suffix = strtoupper(str_replace('suple-speed-css-', '', $handle));
+
+        if (strlen($suffix) !== 1) {
+            return null;
+        }
+
+        return $suffix;
+    }
+
+    /**
+     * Registrar en el logger las pruebas manuales
+     */
+    private function log_async_manual_tests() {
+        if (!$this->logger) {
+            return;
+        }
+
+        static $logged = false;
+
+        if ($logged) {
+            return;
+        }
+
+        $logged = true;
+
+        if (empty($this->async_css_groups)) {
+            return;
+        }
+
+        $this->logger->notice('Manual test required: validate Elementor CSS dependencies with async loading.', [
+            'async_css_groups' => $this->async_css_groups,
+            'steps' => [
+                '1. Clear caches and load a complex Elementor page on the frontend to ensure widgets render styled.',
+                '2. Open the same page in the Elementor editor and verify that the design system and global styles load without delays.',
+                '3. Inspect the Network tab to confirm suple-speed-css-* requests complete and rel="stylesheet" is applied after preload.'
+            ]
+        ]);
+    }
+
     /**
      * Inyectar preloads
      */

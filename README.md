@@ -375,3 +375,14 @@ Desarrollado por **Suple** - Especialistas en optimización de WordPress y Eleme
 ---
 
 **¿Te gusta Suple Speed?** ⭐ [Danos una calificación](https://wordpress.org/plugins/suple-speed/) y comparte con otros desarrolladores.
+
+# 🧪 Pruebas Manuales Guiadas
+
+## Validar carga asíncrona de CSS fusionado
+1. Activa la fusión de CSS y selecciona los grupos que quieras marcar como "Async CSS Groups" en `Suple Speed > Settings > Advanced`.
+2. Purga la caché de Suple Speed y la del navegador para comenzar desde un estado limpio.
+3. Abre en el frontend una página construida con Elementor que incluya widgets globales, plantillas y tipografías personalizadas.
+4. Comprueba en las herramientas de desarrollador (pestaña Network) que los archivos `suple-speed-css-*` se solicitan como `rel=preload`, cambian a `rel=stylesheet` tras cargarse y no generan errores 404.
+5. Repite la verificación dentro del editor de Elementor para confirmar que las dependencias de estilo (Elementor Kit, tipografías y efectos) se mantienen intactas.
+6. Si detectas cualquier FOUC, marca el grupo afectado como crítico (sin async) y vuelve a probar tras limpiar caché.
+
