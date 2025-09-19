@@ -491,7 +491,7 @@ class Admin {
         wp_enqueue_script(
             'suple-speed-admin',
             SUPLE_SPEED_PLUGIN_URL . 'public/js/admin.js',
-            ['jquery', 'wp-util'],
+            ['jquery', 'wp-util', 'jquery-ui-sortable'],
             $version,
             true
         );
