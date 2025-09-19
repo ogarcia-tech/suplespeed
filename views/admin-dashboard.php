@@ -1009,7 +1009,7 @@ if (empty($active_tab) || !isset($tabs[$active_tab])) {
                     <?php else: ?>
                         <p><?php _e('No critical CSS has been configured yet. You can add one in the settings panel.', 'suple-speed'); ?></p>
                     <?php endif; ?>
-                    <a class="suple-button" href="<?php echo esc_url(admin_url('admin.php?page=suple-speed-settings#tab-assets')); ?>">
+                    <a class="suple-button" href="<?php echo esc_url(admin_url('admin.php?page=suple-speed-settings#tab-critical')); ?>">
                         <?php _e('Edit Critical CSS', 'suple-speed'); ?>
                     </a>
                 </div>
