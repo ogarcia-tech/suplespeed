@@ -222,7 +222,9 @@ class Admin {
         ];
         
         foreach ($boolean_settings as $setting) {
-            $sanitized[$setting] = !empty($input[$setting]);
+            $sanitized[$setting] = array_key_exists($setting, $input)
+                ? filter_var($input[$setting], FILTER_VALIDATE_BOOLEAN)
+                : false;
         }
         
         // Configuraciones numéricas
