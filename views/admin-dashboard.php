@@ -514,7 +514,8 @@ $onboarding_critical_labels = array_map(
     
                 <div id="scan-results" style="display:none;"></div>
             </div>
-    </div>
+        </section>
+    <?php endif; ?>
 
     <!-- Performance Tab -->
     <div class="suple-tab-panel <?php echo $active_tab === 'performance' ? 'is-active' : ''; ?>" data-tab="performance">
