@@ -709,6 +709,60 @@ class Admin {
      * Renderizar dashboard
      */
     public function render_dashboard() {
+        $compat_module  = function_exists('suple_speed') ? suple_speed()->compat : null;
+        $critical_css   = function_exists('suple_speed') ? suple_speed()->critical_css_generator : null;
+        $fonts_module   = function_exists('suple_speed') ? suple_speed()->fonts : null;
+
+        $critical_css_status       = [
+            'id'           => '',
+            'url'          => '',
+            'status'       => 'idle',
+            'message'      => '',
+            'created_at'   => 0,
+            'started_at'   => 0,
+            'completed_at' => 0,
+            'duration'     => 0,
+            'css_length'   => 0,
+            'error_code'   => '',
+        ];
+        $critical_css_started_at   = '';
+        $critical_css_completed_at = '';
+        $critical_css_duration     = '';
+
+        if ($critical_css && method_exists($critical_css, 'get_status')) {
+            $critical_css_status = wp_parse_args(
+                $critical_css->get_status(),
+                $critical_css_status
+            );
+
+            $date_format = trim(get_option('date_format') . ' ' . get_option('time_format'));
+            if (empty($date_format)) {
+                $date_format = 'Y-m-d H:i:s';
+            }
+
+            if (!empty($critical_css_status['started_at'])) {
+                $critical_css_started_at = wp_date($date_format, (int) $critical_css_status['started_at']);
+            }
+
+            if (!empty($critical_css_status['completed_at'])) {
+                $critical_css_completed_at = wp_date($date_format, (int) $critical_css_status['completed_at']);
+            }
+
+            if (!empty($critical_css_status['started_at']) && !empty($critical_css_status['completed_at'])) {
+                $critical_css_duration = human_time_diff(
+                    (int) $critical_css_status['started_at'],
+                    (int) $critical_css_status['completed_at']
+                );
+            } elseif (!empty($critical_css_status['duration'])) {
+                $critical_css_duration = human_time_diff(time() - (int) $critical_css_status['duration'], time());
+            }
+        }
+
+        $font_preloads = [];
+        if ($fonts_module && method_exists($fonts_module, 'get_font_preloads')) {
+            $font_preloads = $fonts_module->get_font_preloads();
+        }
+
         include SUPLE_SPEED_PLUGIN_DIR . 'views/admin-dashboard.php';
     }
 
