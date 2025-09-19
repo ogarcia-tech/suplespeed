@@ -272,6 +272,13 @@ class Admin {
             }
         }
 
+        
+        // Campos de textarea
+        $sanitized['images_critical_manual'] = isset($input['images_critical_manual']) ?
+            sanitize_textarea_field($input['images_critical_manual']) :
+            '';
+
+
         return $sanitized;
     }
     

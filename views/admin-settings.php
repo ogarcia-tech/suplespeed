@@ -379,6 +379,22 @@ $current_settings = $this->get_current_settings();
                         </div>
                     </div>
 
+                    <div class="suple-form-row">
+                        <label class="suple-form-label"><?php _e('Critical image heuristic', 'suple-speed'); ?></label>
+                        <div class="suple-form-help">
+                            <p><?php _e('We automatically preload the site logo, the featured image of the current entry and the first large image in the content (including Elementor hero blocks).', 'suple-speed'); ?></p>
+                            <p><?php _e('These images get high fetch priority and skip lazy loading to improve Largest Contentful Paint.', 'suple-speed'); ?></p>
+                        </div>
+                    </div>
+
+                    <div class="suple-form-row">
+                        <label for="images_critical_manual" class="suple-form-label"><?php _e('Manual critical images', 'suple-speed'); ?></label>
+                        <textarea id="images_critical_manual" name="images_critical_manual" class="suple-form-textarea" rows="4"><?php echo esc_textarea($current_settings['images_critical_manual'] ?? ''); ?></textarea>
+                        <div class="suple-form-help">
+                            <?php _e('One value per line. You can use attachment IDs, URLs or paths relative to the uploads directory to force additional images to be treated as critical (useful for false positives or custom layouts).', 'suple-speed'); ?>
+                        </div>
+                    </div>
+
                 </div>
             </div>
 
