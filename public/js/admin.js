@@ -72,6 +72,10 @@
             $(document).on('change', '.suple-handle-group-select', this.onManualGroupChange.bind(this));
             $(document).on('click', '.suple-save-manual-groups', this.saveManualGroups.bind(this));
             $(document).on('click', '.suple-regenerate-bundles', this.regenerateBundles.bind(this));
+            $(document).on('click', '.suple-run-preload-collector', this.runPreloadCollector.bind(this));
+            $(document).on('click', '.suple-refresh-preload-recommendations', this.refreshPreloadRecommendations.bind(this));
+            $(document).on('click', '.suple-accept-preload', this.acceptPreloadRecommendation.bind(this));
+            $(document).on('click', '.suple-reject-preload', this.rejectPreloadRecommendation.bind(this));
         },
 
         initComponents: function() {
@@ -1062,7 +1066,7 @@
         },
 
         initializeAssetsUI: function() {
-            const hasAssetsUI = $('#handles-results').length > 0 || $('#bundle-status').length > 0;
+            const hasAssetsUI = $('#handles-results').length > 0 || $('#bundle-status').length > 0 || $('#suple-preload-recommendations').length > 0;
 
             if (!hasAssetsUI) {
                 return;
@@ -1074,9 +1078,11 @@
             this.assetHandles = this.assetHandles || { css: {}, js: {} };
             this.manualDirty = false;
             this.needsRegeneration = false;
+            this.preloadRecommendations = supleSpeedAdmin.preloadRecommendations || [];
 
             this.renderManualGroupsTable();
             this.updateBundleStatus(this.bundleStatus);
+            this.renderPreloadRecommendations(this.preloadRecommendations);
         },
 
         renderManualGroupsTable: function() {
@@ -1198,6 +1204,195 @@
             $container.html(html);
 
             $('.suple-regenerate-bundles').prop('disabled', !this.needsRegeneration);
+        },
+
+        renderPreloadRecommendations: function(list) {
+            const $container = $('#suple-preload-recommendations');
+            if ($container.length === 0) return;
+
+            const labels = supleSpeedAdmin.labels || {};
+            const strings = supleSpeedAdmin.strings || {};
+            const emptyMessage = $container.data('emptyMessage') || strings.preloadNoSuggestions || '';
+            const recommendations = Array.isArray(list) ? list : [];
+            this.preloadRecommendations = recommendations;
+
+            if (recommendations.length === 0) {
+                const message = emptyMessage ? this.escapeHtml(emptyMessage) : '';
+                $container.html(message ? '<p class="suple-muted">' + message + '</p>' : '');
+                return;
+            }
+
+            let html = '<table class="suple-table">';
+            html += '<thead><tr>' +
+                '<th>' + this.escapeHtml(labels.type || 'Type') + '</th>' +
+                '<th>' + this.escapeHtml(labels.resource || 'Resource') + '</th>' +
+                '<th>' + this.escapeHtml(labels.size || 'Size') + '</th>' +
+                '<th>' + this.escapeHtml(labels.seenOn || 'Seen on') + '</th>' +
+                '<th>' + this.escapeHtml(labels.position || 'Position') + '</th>' +
+                '<th>' + this.escapeHtml(labels.actions || 'Actions') + '</th>' +
+                '</tr></thead><tbody>';
+
+            const self = this;
+
+            recommendations.forEach(function(rec) {
+                const id = self.escapeHtml(rec.id || '');
+                const type = rec.type || rec.as || '';
+                const typeLabel = type ? self.escapeHtml(type.charAt(0).toUpperCase() + type.slice(1)) : self.escapeHtml(strings.unknown || 'Unknown');
+                const url = rec.url ? self.escapeHtml(rec.url) : '';
+                const size = typeof rec.size === 'number' && rec.size > 0 ? self.escapeHtml(self.formatBytes(rec.size)) : '&mdash;';
+                const pages = Array.isArray(rec.pages) ? rec.pages : [];
+                const crossoriginLabel = strings.crossorigin || 'crossorigin';
+                const crossorigin = rec.crossorigin ? '<br><small>' + self.escapeHtml(crossoriginLabel + ': ' + rec.crossorigin) + '</small>' : '';
+                const position = rec.position ? '#' + self.escapeHtml(rec.position) : '&mdash;';
+
+                let pagesHtml = '&mdash;';
+                if (pages.length > 0) {
+                    pagesHtml = pages.map(function(page) {
+                        const escaped = self.escapeHtml(page);
+                        return '<div><a href="' + escaped + '" target="_blank" rel="noopener">' + escaped + '</a></div>';
+                    }).join('');
+                }
+
+                html += '<tr data-id="' + id + '">' +
+                    '<td><span class="suple-badge">' + typeLabel + '</span>' + crossorigin + '</td>' +
+                    '<td>' + (url ? '<code>' + url + '</code>' : '&mdash;') + '</td>' +
+                    '<td>' + size + '</td>' +
+                    '<td>' + pagesHtml + '</td>' +
+                    '<td>' + position + '</td>' +
+                    '<td>' +
+                        '<div class="suple-flex suple-gap-0-5 suple-flex-wrap">' +
+                            '<button type="button" class="suple-button success suple-accept-preload" data-id="' + id + '"><span class="dashicons dashicons-upload"></span> ' + self.escapeHtml(strings.addPreload || 'Add preload') + '</button>' +
+                            '<button type="button" class="suple-button secondary suple-reject-preload" data-id="' + id + '"><span class="dashicons dashicons-no-alt"></span> ' + self.escapeHtml(strings.dismiss || 'Dismiss') + '</button>' +
+                        '</div>' +
+                    '</td>' +
+                    '</tr>';
+            });
+
+            html += '</tbody></table>';
+
+            $container.html(html);
+        },
+
+        runPreloadCollector: function(e) {
+            e.preventDefault();
+
+            const $button = $(e.currentTarget);
+            if ($button.prop('disabled')) return;
+
+            const strings = supleSpeedAdmin.strings || {};
+            const originalHtml = $button.html();
+            const loadingText = strings.preloadCollecting || strings.processing || 'Processing…';
+
+            $button.data('originalHtml', originalHtml);
+            $button.prop('disabled', true).html('<span class="suple-spinner"></span> ' + this.escapeHtml(loadingText));
+
+            const self = this;
+
+            this.ajaxRequest('generate_preload_recommendations', {}, function(response) {
+                const message = response && response.message ? response.message : (strings.success || 'Done');
+                $button.prop('disabled', false).html(originalHtml);
+
+                if (response && response.recommendations) {
+                    self.renderPreloadRecommendations(response.recommendations);
+                }
+
+                self.showNotice('success', message);
+            }, function(error) {
+                const errorMessage = error || strings.preloadCollectorError || strings.error || 'Error';
+                $button.prop('disabled', false).html(originalHtml);
+                self.showNotice('error', errorMessage);
+            });
+        },
+
+        refreshPreloadRecommendations: function(e) {
+            e.preventDefault();
+
+            const $button = $(e.currentTarget);
+            if ($button.prop('disabled')) return;
+
+            const strings = supleSpeedAdmin.strings || {};
+            const originalHtml = $button.html();
+
+            $button.data('originalHtml', originalHtml);
+            $button.prop('disabled', true).html('<span class="suple-spinner"></span> ' + this.escapeHtml(strings.processing || 'Processing…'));
+
+            const self = this;
+
+            this.ajaxRequest('get_preload_recommendations', {}, function(response) {
+                $button.prop('disabled', false).html(originalHtml);
+
+                if (response && response.recommendations) {
+                    self.renderPreloadRecommendations(response.recommendations);
+                }
+            }, function(error) {
+                const errorMessage = error || strings.error || 'Error';
+                $button.prop('disabled', false).html(originalHtml);
+                self.showNotice('error', errorMessage);
+            });
+        },
+
+        acceptPreloadRecommendation: function(e) {
+            e.preventDefault();
+
+            const $button = $(e.currentTarget);
+            if ($button.prop('disabled')) return;
+
+            const id = $button.data('id');
+            if (!id) return;
+
+            const strings = supleSpeedAdmin.strings || {};
+            const originalHtml = $button.html();
+
+            $button.prop('disabled', true).html('<span class="suple-spinner"></span>');
+
+            const self = this;
+
+            this.ajaxRequest('accept_preload_recommendation', { id: id }, function(response) {
+                $button.prop('disabled', false).html(originalHtml);
+
+                if (response && response.recommendations) {
+                    self.renderPreloadRecommendations(response.recommendations);
+                }
+
+                const message = response && response.message ? response.message : (strings.preloadAcceptSuccess || strings.success || 'Saved');
+                self.showNotice('success', message);
+            }, function(error) {
+                const errorMessage = error || strings.error || 'Error';
+                $button.prop('disabled', false).html(originalHtml);
+                self.showNotice('error', errorMessage);
+            });
+        },
+
+        rejectPreloadRecommendation: function(e) {
+            e.preventDefault();
+
+            const $button = $(e.currentTarget);
+            if ($button.prop('disabled')) return;
+
+            const id = $button.data('id');
+            if (!id) return;
+
+            const strings = supleSpeedAdmin.strings || {};
+            const originalHtml = $button.html();
+
+            $button.prop('disabled', true).html('<span class="suple-spinner"></span>');
+
+            const self = this;
+
+            this.ajaxRequest('reject_preload_recommendation', { id: id }, function(response) {
+                $button.prop('disabled', false).html(originalHtml);
+
+                if (response && response.recommendations) {
+                    self.renderPreloadRecommendations(response.recommendations);
+                }
+
+                const message = response && response.message ? response.message : (strings.preloadDismissed || strings.success || 'Done');
+                self.showNotice('success', message);
+            }, function(error) {
+                const errorMessage = error || strings.error || 'Error';
+                $button.prop('disabled', false).html(originalHtml);
+                self.showNotice('error', errorMessage);
+            });
         },
 
         onManualGroupChange: function(e) {
