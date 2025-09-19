@@ -2387,6 +2387,10 @@
 
         initDragDrop: function() {
             // Implementar drag & drop para reordenar elementos
+            if (typeof $.fn.sortable !== 'function') {
+                return;
+            }
+
             $('.suple-sortable').sortable({
                 handle: '.suple-drag-handle',
                 update: function() {
