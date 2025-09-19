@@ -56,6 +56,10 @@
             $(document).on('change', '.suple-handle-group-select', this.onManualGroupChange.bind(this));
             $(document).on('click', '.suple-save-manual-groups', this.saveManualGroups.bind(this));
             $(document).on('click', '.suple-regenerate-bundles', this.regenerateBundles.bind(this));
+
+            $(document).on('click', '.suple-clean-revisions', this.cleanRevisions);
+            $(document).on('click', '.suple-clean-transients', this.cleanTransients);
+            $(document).on('click', '.suple-optimize-tables', this.optimizeTables);
         },
 
         initComponents: function() {
@@ -257,9 +261,108 @@
             });
         },
 
+        cleanRevisions: function(e) {
+            e.preventDefault();
+
+            if (!confirm(supleSpeedAdmin.strings.confirmCleanRevisions)) {
+                return;
+            }
+
+            const $button = $(this);
+            const originalHtml = $button.html();
+
+            $button.html('<span class="suple-spinner"></span> ' + supleSpeedAdmin.strings.processing);
+            $button.prop('disabled', true);
+
+            SupleSpeedAdmin.ajaxRequest('database_cleanup_revisions', {}, function(data) {
+                $button.html(originalHtml);
+                $button.prop('disabled', false);
+
+                if (data && data.message) {
+                    SupleSpeedAdmin.showNotice('success', data.message);
+                }
+
+                if (data && data.stats) {
+                    SupleSpeedAdmin.updateDatabaseStats(data.stats);
+                    SupleSpeedAdmin.updateDatabaseTable(data.stats.tables || []);
+                }
+            }, function(error) {
+                $button.html(originalHtml);
+                $button.prop('disabled', false);
+                SupleSpeedAdmin.showNotice('error', error);
+            });
+        },
+
+        cleanTransients: function(e) {
+            e.preventDefault();
+
+            if (!confirm(supleSpeedAdmin.strings.confirmCleanTransients)) {
+                return;
+            }
+
+            const $button = $(this);
+            const originalHtml = $button.html();
+
+            $button.html('<span class="suple-spinner"></span> ' + supleSpeedAdmin.strings.processing);
+            $button.prop('disabled', true);
+
+            SupleSpeedAdmin.ajaxRequest('database_cleanup_transients', {}, function(data) {
+                $button.html(originalHtml);
+                $button.prop('disabled', false);
+
+                if (data && data.message) {
+                    SupleSpeedAdmin.showNotice('success', data.message);
+                }
+
+                if (data && data.stats) {
+                    SupleSpeedAdmin.updateDatabaseStats(data.stats);
+                    SupleSpeedAdmin.updateDatabaseTable(data.stats.tables || []);
+                }
+            }, function(error) {
+                $button.html(originalHtml);
+                $button.prop('disabled', false);
+                SupleSpeedAdmin.showNotice('error', error);
+            });
+        },
+
+        optimizeTables: function(e) {
+            e.preventDefault();
+
+            if (!confirm(supleSpeedAdmin.strings.confirmOptimizeTables)) {
+                return;
+            }
+
+            const $button = $(this);
+            const originalHtml = $button.html();
+            const scope = $button.data('scope') || 'overhead';
+
+            $button.html('<span class="suple-spinner"></span> ' + supleSpeedAdmin.strings.processing);
+            $button.prop('disabled', true);
+
+            SupleSpeedAdmin.ajaxRequest('database_optimize_tables', {
+                scope: scope
+            }, function(data) {
+                $button.html(originalHtml);
+                $button.prop('disabled', false);
+
+                if (data && data.message) {
+                    SupleSpeedAdmin.showNotice('success', data.message);
+                }
+
+                if (data && data.stats) {
+                    SupleSpeedAdmin.updateDatabaseStats(data.stats);
+                    SupleSpeedAdmin.updateDatabaseTable(data.stats.tables || []);
+                }
+            }, function(error) {
+                $button.html(originalHtml);
+                $button.prop('disabled', false);
+                SupleSpeedAdmin.showNotice('error', error);
+            });
+        },
+
         purgeCache: function(e) {
             e.preventDefault();
-            
+
             if (!confirm(supleSpeedAdmin.strings.confirmPurge)) {
                 return;
             }
@@ -1114,6 +1217,20 @@
             return value.toFixed(precision) + ' ' + units[unitIndex];
         },
 
+        formatNumber: function(value) {
+            if (value === null || typeof value === 'undefined') {
+                return '0';
+            }
+
+            const number = Number(value);
+
+            if (!isFinite(number)) {
+                return value;
+            }
+
+            return Math.round(number).toLocaleString();
+        },
+
         escapeHtml: function(value) {
             if (typeof value !== 'string') {
                 return value;
@@ -1262,11 +1379,104 @@
             // Actualizar estadísticas de caché si están visibles
             const $stats = $('.cache-stats');
             if ($stats.length === 0) return;
-            
+
             SupleSpeedAdmin.ajaxRequest('get_cache_stats', {}, function(data) {
                 $stats.find('.total-files').text(data.total_files);
                 $stats.find('.total-size').text(data.total_size_formatted);
             });
+        },
+
+        updateDatabaseStats: function(stats) {
+            if (!stats) {
+                return;
+            }
+
+            const formatNumber = SupleSpeedAdmin.formatNumber;
+
+            if (typeof stats.total_revisions !== 'undefined') {
+                $('.database-total-revisions').text(formatNumber(stats.total_revisions));
+            }
+
+            if (typeof stats.expired_transients !== 'undefined') {
+                $('.database-expired-transients').text(formatNumber(stats.expired_transients));
+            }
+
+            if (typeof stats.tables_needing_optimization !== 'undefined') {
+                $('.database-tables-needing-optimization').text(formatNumber(stats.tables_needing_optimization));
+            }
+
+            if (typeof stats.total_tables !== 'undefined') {
+                $('.database-total-tables').text(formatNumber(stats.total_tables));
+            }
+
+            if (typeof stats.database_size_formatted !== 'undefined') {
+                $('.database-size-value').text(stats.database_size_formatted);
+            }
+
+            if (typeof stats.overhead_formatted !== 'undefined') {
+                $('.database-overhead').text(stats.overhead_formatted);
+            }
+
+            if (typeof stats.tables_needing_optimization !== 'undefined' && typeof stats.total_tables !== 'undefined') {
+                const optimizationText = supleSpeedAdmin.strings.tablesNeedingOptimization
+                    .replace('%1$s', '<strong class="database-tables-needing-optimization">' + formatNumber(stats.tables_needing_optimization) + '</strong>')
+                    .replace('%2$s', '<span class="database-total-tables">' + formatNumber(stats.total_tables) + '</span>');
+
+                $('.database-optimization-status').html(optimizationText);
+            }
+
+            const revisionText = stats.last_revision_cleanup_human
+                ? supleSpeedAdmin.strings.agoFormat.replace('%s', stats.last_revision_cleanup_human)
+                : supleSpeedAdmin.strings.never;
+            $('.database-last-revision').text(revisionText);
+
+            const transientText = stats.last_transients_cleanup_human
+                ? supleSpeedAdmin.strings.agoFormat.replace('%s', stats.last_transients_cleanup_human)
+                : supleSpeedAdmin.strings.never;
+            $('.database-last-transients').text(transientText);
+
+            const optimizationLabel = stats.last_optimization_human
+                ? supleSpeedAdmin.strings.agoFormat.replace('%s', stats.last_optimization_human)
+                : supleSpeedAdmin.strings.never;
+            $('.database-last-optimization').text(optimizationLabel);
+        },
+
+        updateDatabaseTable: function(tables) {
+            const $body = $('#suple-database-table-body');
+            if ($body.length === 0) {
+                return;
+            }
+
+            if (!Array.isArray(tables) || tables.length === 0) {
+                const emptyMessage = SupleSpeedAdmin.escapeHtml(supleSpeedAdmin.strings.databaseNoTables);
+                $body.html('<tr><td colspan="5" class="suple-text-muted database-empty-message">' + emptyMessage + '</td></tr>');
+                return;
+            }
+
+            let html = '';
+
+            tables.forEach(function(table) {
+                const name = SupleSpeedAdmin.escapeHtml(table.name || '');
+                const badge = table.needs_optimization
+                    ? ' <span class="suple-badge warning">' + SupleSpeedAdmin.escapeHtml(supleSpeedAdmin.strings.tableNeedsAttention) + '</span>'
+                    : '';
+                const rows = SupleSpeedAdmin.formatNumber(table.rows || 0);
+                const size = SupleSpeedAdmin.escapeHtml(table.size_formatted || '');
+                const overhead = table.overhead > 0
+                    ? SupleSpeedAdmin.escapeHtml(table.overhead_formatted || '')
+                    : '&mdash;';
+                const engine = SupleSpeedAdmin.escapeHtml(table.engine || '');
+
+                html += '<tr>' +
+                    '<td>' + name + badge + '</td>' +
+                    '<td>' + rows + '</td>' +
+                    '<td>' + size + '</td>' +
+                    '<td>' + overhead + '</td>' +
+                    '<td>' + engine + '</td>' +
+                    '</tr>';
+            });
+
+            $body.html(html);
         },
 
         autoSave: function($form) {

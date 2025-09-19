@@ -12,6 +12,7 @@ class Admin {
      */
     private $settings;
     private $logger;
+    private $database;
 
     /**
      * Pasos de onboarding
@@ -28,6 +29,9 @@ class Admin {
         
         if (function_exists('suple_speed')) {
             $this->logger = suple_speed()->logger;
+            if (isset(suple_speed()->database)) {
+                $this->database = suple_speed()->database;
+            }
         }
         
         $this->init_hooks();
@@ -50,6 +54,9 @@ class Admin {
         add_action('wp_ajax_suple_speed_import_settings', [$this, 'ajax_import_settings']);
 
         add_action('wp_ajax_suple_speed_update_onboarding', [$this, 'ajax_update_onboarding']);
+        add_action('wp_ajax_suple_speed_database_cleanup_revisions', [$this, 'ajax_database_cleanup_revisions']);
+        add_action('wp_ajax_suple_speed_database_cleanup_transients', [$this, 'ajax_database_cleanup_transients']);
+        add_action('wp_ajax_suple_speed_database_optimize_tables', [$this, 'ajax_database_optimize_tables']);
 
         
         // Plugin action links
@@ -423,11 +430,19 @@ class Admin {
             'strings' => [
                 'confirmReset' => __('Are you sure you want to reset all settings?', 'suple-speed'),
                 'confirmPurge' => __('Are you sure you want to purge all cache?', 'suple-speed'),
+                'confirmCleanRevisions' => __('This will permanently delete all post revisions. Continue?', 'suple-speed'),
+                'confirmCleanTransients' => __('Remove all expired transients? Cached data may need to be regenerated.', 'suple-speed'),
+                'confirmOptimizeTables' => __('Run OPTIMIZE TABLE on database tables? This may lock tables temporarily.', 'suple-speed'),
                 'processing' => __('Processing...', 'suple-speed'),
                 'scanningHandles' => __('Scanning handles…', 'suple-speed'),
                 'scanHandlesError' => __('We could not retrieve the handles for this page.', 'suple-speed'),
                 'success' => __('Operation completed successfully', 'suple-speed'),
-                'error' => __('An error occurred', 'suple-speed')
+                'error' => __('An error occurred', 'suple-speed'),
+                'databaseNoTables' => __('No table information available.', 'suple-speed'),
+                'tablesNeedingOptimization' => __('Tables needing optimization: %1$s of %2$s', 'suple-speed'),
+                'tableNeedsAttention' => __('Needs attention', 'suple-speed'),
+                'agoFormat' => __('%s ago', 'suple-speed'),
+                'never' => __('Never', 'suple-speed')
             ]
         ]);
     }
@@ -860,7 +875,121 @@ class Admin {
         ]);
     }
 
+    /**
+     * AJAX: Cleanup post revisions
+     */
+    public function ajax_database_cleanup_revisions() {
+        check_ajax_referer('suple_speed_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(__('Unauthorized', 'suple-speed'));
+        }
+
+        $database = $this->get_database_module();
+
+        if (!$database) {
+            wp_send_json_error(__('Database tools are not available.', 'suple-speed'));
+        }
+
+        $limit = isset($_POST['limit']) ? absint($_POST['limit']) : 0;
+        $result = $database->cleanup_revisions($limit);
+
+        $message = $result['deleted'] > 0
+            ? sprintf(__('Deleted %d post revisions.', 'suple-speed'), $result['deleted'])
+            : __('No post revisions were deleted.', 'suple-speed');
+
+        wp_send_json_success([
+            'message' => $message,
+            'result'  => $result,
+            'stats'   => $database->get_stats(),
+        ]);
+    }
+
+    /**
+     * AJAX: Cleanup expired transients
+     */
+    public function ajax_database_cleanup_transients() {
+        check_ajax_referer('suple_speed_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(__('Unauthorized', 'suple-speed'));
+        }
+
+        $database = $this->get_database_module();
+
+        if (!$database) {
+            wp_send_json_error(__('Database tools are not available.', 'suple-speed'));
+        }
+
+        $limit = isset($_POST['limit']) ? absint($_POST['limit']) : 0;
+        $result = $database->cleanup_expired_transients($limit);
+
+        $message = $result['deleted'] > 0
+            ? sprintf(__('Deleted %d expired transients.', 'suple-speed'), $result['deleted'])
+            : __('No expired transients found.', 'suple-speed');
+
+        wp_send_json_success([
+            'message' => $message,
+            'result'  => $result,
+            'stats'   => $database->get_stats(),
+        ]);
+    }
+
+    /**
+     * AJAX: Optimize database tables
+     */
+    public function ajax_database_optimize_tables() {
+        check_ajax_referer('suple_speed_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(__('Unauthorized', 'suple-speed'));
+        }
+
+        $database = $this->get_database_module();
+
+        if (!$database) {
+            wp_send_json_error(__('Database tools are not available.', 'suple-speed'));
+        }
+
+        $tables = [];
+        if (!empty($_POST['tables'])) {
+            $tables = array_map(function($table) {
+                return sanitize_text_field(wp_unslash($table));
+            }, (array) $_POST['tables']);
+        }
+
+        $scope = isset($_POST['scope']) ? sanitize_text_field(wp_unslash($_POST['scope'])) : 'overhead';
+        $only_overhead = $scope !== 'all';
+
+        $result = $database->optimize_tables($tables, $only_overhead);
+
+        $message = $result['optimized'] > 0
+            ? sprintf(__('Optimized %d database tables.', 'suple-speed'), $result['optimized'])
+            : __('No tables required optimization.', 'suple-speed');
+
+        wp_send_json_success([
+            'message' => $message,
+            'result'  => $result,
+            'stats'   => $database->get_stats(),
+        ]);
+    }
+
     // === UTILIDADES ===
+
+    /**
+     * Retrieve database module instance
+     */
+    private function get_database_module() {
+        if ($this->database && method_exists($this->database, 'get_stats')) {
+            return $this->database;
+        }
+
+        if (function_exists('suple_speed') && isset(suple_speed()->database)) {
+            return suple_speed()->database;
+        }
+
+        return null;
+    }
 
     /**
      * Obtener datos del dashboard
@@ -880,8 +1009,11 @@ class Admin {
             $data['fonts_stats'] = suple_speed()->fonts->get_fonts_stats();
             $data['images_stats'] = suple_speed()->images->get_optimization_stats();
             $data['compat_report'] = suple_speed()->compat->get_compatibility_report();
+            if ($this->database && method_exists($this->database, 'get_stats')) {
+                $data['database_stats'] = $this->database->get_stats();
+            }
         }
-        
+
         return $data;
     }
     

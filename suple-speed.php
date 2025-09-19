@@ -53,6 +53,7 @@ class SupleSpeed {
     public $logger;
     public $elementor_guard;
     public $compat;
+    public $database;
     public $wp_cli;
     
     /**
@@ -145,6 +146,7 @@ class SupleSpeed {
         require_once SUPLE_SPEED_PLUGIN_DIR . 'includes/class-fonts.php';
         require_once SUPLE_SPEED_PLUGIN_DIR . 'includes/class-images.php';
         require_once SUPLE_SPEED_PLUGIN_DIR . 'includes/class-psi.php';
+        require_once SUPLE_SPEED_PLUGIN_DIR . 'includes/class-database.php';
         require_once SUPLE_SPEED_PLUGIN_DIR . 'includes/class-admin.php';
         
         // Inicializar módulos
@@ -157,7 +159,8 @@ class SupleSpeed {
         $this->fonts = new SupleSpeed\Fonts();
         $this->images = new SupleSpeed\Images();
         $this->psi = new SupleSpeed\PSI();
-        
+        $this->database = new SupleSpeed\Database();
+
         // Admin solo en el backend
         if (is_admin()) {
             $this->admin = new SupleSpeed\Admin();
