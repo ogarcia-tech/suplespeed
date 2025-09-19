@@ -33,6 +33,8 @@ class Assets {
     private $dependency_map = [];
     private $async_css_groups = [];
     private $style_filter_registered = false;
+    private $manual_groups = [];
+    private $manual_groups_raw = [];
     
     public function __construct() {
         $this->settings = get_option('suple_speed_settings', []);
@@ -44,6 +46,8 @@ class Assets {
         }
 
         $this->async_css_groups = array_map('strtoupper', $this->settings['assets_async_css_groups'] ?? []);
+
+        $this->load_manual_groups();
 
         $this->init_hooks();
         $this->load_excluded_handles();
@@ -89,6 +93,19 @@ class Assets {
             $this->settings['assets_exclude_handles'] ?? [],
             $this->get_compatibility_excluded_handles()
         );
+    }
+
+    /**
+     * Cargar overrides manuales de grupos
+     */
+    private function load_manual_groups() {
+        $stored = get_option('suple_speed_assets_manual_groups', []);
+
+        if (!is_array($stored)) {
+            $stored = [];
+        }
+
+        $this->set_manual_groups($stored);
     }
     
     /**
@@ -261,8 +278,14 @@ class Assets {
      * Clasificar handle en grupo
      */
     private function classify_handle($handle, $src) {
+        $manual_group = $this->get_manual_group_for_handle($handle);
+
+        if (!empty($manual_group)) {
+            return $manual_group;
+        }
+
         // Elementor (Grupo C)
-        if (strpos($handle, 'elementor') !== false || 
+        if (strpos($handle, 'elementor') !== false ||
             strpos($src, 'elementor') !== false ||
             strpos($handle, 'swiper') !== false) {
             return 'C';
@@ -291,6 +314,15 @@ class Assets {
         
         // Por defecto, terceros (Grupo D)
         return 'D';
+    }
+
+    /**
+     * Obtener grupo manual asignado a un handle
+     */
+    private function get_manual_group_for_handle($handle) {
+        $normalized = strtolower($handle);
+
+        return $this->manual_groups[$normalized] ?? '';
     }
     
     /**
@@ -846,14 +878,195 @@ class Assets {
             if (!$data['can_merge']) {
                 continue;
             }
-            
+
             $group = $data['group'];
+
+            $manual_group = $this->get_manual_group_for_handle($handle);
+
+            if (!empty($manual_group)) {
+                $group = $manual_group;
+            }
+
             if (in_array($group, $enabled_groups)) {
                 $grouped[$group][$handle] = $data;
             }
         }
-        
+
         return $grouped;
+    }
+
+    /**
+     * Obtener etiquetas de los grupos disponibles
+     */
+    public function get_asset_group_labels() {
+        $labels = [
+            'A' => __('Core / Theme', 'suple-speed'),
+            'B' => __('WooCommerce / Security', 'suple-speed'),
+            'C' => __('Elementor', 'suple-speed'),
+            'D' => __('Third-party / Misc', 'suple-speed')
+        ];
+
+        return apply_filters('suple_speed_asset_group_labels', $labels);
+    }
+
+    /**
+     * Obtener overrides manuales actuales
+     */
+    public function get_manual_groups() {
+        return $this->manual_groups_raw;
+    }
+
+    /**
+     * Definir overrides manuales
+     */
+    public function set_manual_groups($groups) {
+        if (!is_array($groups)) {
+            $groups = [];
+        }
+
+        $normalized = [];
+        $raw = [];
+
+        foreach ($groups as $handle => $group) {
+            $handle_key = strtolower($handle);
+            $group_key = strtoupper($group);
+
+            if (empty($handle_key) || empty($group_key)) {
+                continue;
+            }
+
+            $normalized[$handle_key] = $group_key;
+            $raw[$handle_key] = $group_key;
+        }
+
+        ksort($normalized);
+        ksort($raw);
+
+        $this->manual_groups = $normalized;
+        $this->manual_groups_raw = $raw;
+    }
+
+    /**
+     * Obtener estado de bundles generados
+     */
+    public function get_bundle_status() {
+        $status = [
+            'css' => [],
+            'js' => []
+        ];
+
+        if (!file_exists($this->assets_dir)) {
+            return $status;
+        }
+
+        $status['css'] = $this->collect_bundle_status('css');
+        $status['js'] = $this->collect_bundle_status('js');
+
+        return $status;
+    }
+
+    /**
+     * Purga los bundles generados para forzar regeneración
+     */
+    public function purge_asset_cache($types = ['css', 'js']) {
+        if (!file_exists($this->assets_dir)) {
+            return 0;
+        }
+
+        $patterns = [];
+        $deleted = 0;
+
+        if (empty($types)) {
+            $types = ['css', 'js'];
+        }
+
+        if (in_array('css', $types, true)) {
+            $patterns[] = $this->assets_dir . 'css-*.css';
+        }
+
+        if (in_array('js', $types, true)) {
+            $patterns[] = $this->assets_dir . 'js-*.js';
+        }
+
+        foreach ($patterns as $pattern) {
+            $files = glob($pattern) ?: [];
+
+            foreach ($files as $file) {
+                if (is_file($file) && @unlink($file)) {
+                    $deleted++;
+                }
+
+                $meta_file = $file . '.meta';
+
+                if (is_file($meta_file) && @unlink($meta_file)) {
+                    $deleted++;
+                }
+            }
+        }
+
+        return $deleted;
+    }
+
+    /**
+     * Recopila el estado de bundles para un tipo de asset
+     */
+    private function collect_bundle_status($type) {
+        $bundles = [];
+        $pattern = $this->assets_dir . $type . '-*.' . $type;
+        $files = glob($pattern) ?: [];
+
+        foreach ($files as $file) {
+            $basename = basename($file);
+
+            if (!preg_match('/^(css|js)-([A-Z])-([a-f0-9]+)\.' . $type . '$/i', $basename, $matches)) {
+                continue;
+            }
+
+            $group = strtoupper($matches[2]);
+            $identifier = $matches[3];
+
+            $meta = $this->read_merge_metadata($file . '.meta');
+
+            $bundles[$group][] = [
+                'file' => $basename,
+                'group' => $group,
+                'identifier' => $identifier,
+                'version' => filemtime($file),
+                'created' => $meta['created'] ?? filemtime($file),
+                'size' => filesize($file),
+                'handles' => $meta['handles'] ?? [],
+                'type' => $type
+            ];
+        }
+
+        foreach ($bundles as &$entries) {
+            usort($entries, function ($a, $b) {
+                return $b['created'] <=> $a['created'];
+            });
+        }
+
+        ksort($bundles);
+
+        return $bundles;
+    }
+
+    /**
+     * Lee metadatos asociados a un bundle
+     */
+    private function read_merge_metadata($meta_file) {
+        if (!is_file($meta_file)) {
+            return [];
+        }
+
+        $contents = file_get_contents($meta_file);
+
+        if ($contents === false) {
+            return [];
+        }
+
+        $data = json_decode($contents, true);
+
+        return is_array($data) ? $data : [];
     }
     
     /**
@@ -1172,10 +1385,11 @@ class Assets {
                 'deps' => $data->deps,
                 'ver' => $data->ver,
                 'group' => $this->classify_handle($handle, $data->src),
+                'manual_group' => $this->get_manual_group_for_handle($handle),
                 'can_merge' => $this->can_merge_handle($handle)
             ];
         }
-        
+
         // Obtener handles JS registrados
         foreach ($wp_scripts->registered as $handle => $data) {
             $handles_data['js'][$handle] = [
@@ -1184,6 +1398,7 @@ class Assets {
                 'deps' => $data->deps,
                 'ver' => $data->ver,
                 'group' => $this->classify_handle($handle, $data->src),
+                'manual_group' => $this->get_manual_group_for_handle($handle),
                 'can_merge' => $this->can_merge_handle($handle),
                 'can_defer' => $this->can_defer_handle($handle)
             ];

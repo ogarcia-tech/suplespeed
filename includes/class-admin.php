@@ -37,12 +37,14 @@ class Admin {
         add_action('admin_init', [$this, 'handle_legacy_page_redirects'], 1);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_scripts']);
         add_action('admin_notices', [$this, 'show_admin_notices']);
-        
+
         // AJAX handlers
         add_action('wp_ajax_suple_speed_save_settings', [$this, 'ajax_save_settings']);
         add_action('wp_ajax_suple_speed_reset_settings', [$this, 'ajax_reset_settings']);
         add_action('wp_ajax_suple_speed_export_settings', [$this, 'ajax_export_settings']);
         add_action('wp_ajax_suple_speed_import_settings', [$this, 'ajax_import_settings']);
+        add_action('wp_ajax_suple_speed_save_manual_asset_groups', [$this, 'ajax_save_manual_asset_groups']);
+        add_action('wp_ajax_suple_speed_regenerate_asset_bundles', [$this, 'ajax_regenerate_asset_bundles']);
         
         // Plugin action links
         add_filter('plugin_action_links_' . SUPLE_SPEED_PLUGIN_BASENAME, [$this, 'add_action_links']);
@@ -212,11 +214,58 @@ class Admin {
             $version,
             true
         );
-        
+
+        $asset_groups = [];
+        $manual_overrides = [];
+        $bundle_status = ['css' => [], 'js' => []];
+
+        if (function_exists('suple_speed') && isset(suple_speed()->assets)) {
+            $assets_module = suple_speed()->assets;
+
+            if (method_exists($assets_module, 'get_asset_group_labels')) {
+                $asset_groups = $assets_module->get_asset_group_labels();
+            }
+
+            if (method_exists($assets_module, 'get_manual_groups')) {
+                $manual_overrides = $assets_module->get_manual_groups();
+            }
+
+            if (method_exists($assets_module, 'get_bundle_status')) {
+                $bundle_status = $assets_module->get_bundle_status();
+            }
+        }
+
         // Datos para JavaScript
         wp_localize_script('suple-speed-admin', 'supleSpeedAdmin', [
             'nonce' => wp_create_nonce('suple_speed_nonce'),
             'ajaxUrl' => admin_url('admin-ajax.php'),
+            'assetGroups' => $asset_groups,
+            'manualAssetGroups' => $manual_overrides,
+            'bundleStatus' => $bundle_status,
+            'labels' => [
+                'handle' => __('Handle', 'suple-speed'),
+                'type' => __('Type', 'suple-speed'),
+                'detectedGroup' => __('Detected group', 'suple-speed'),
+                'manualGroup' => __('Manual group', 'suple-speed'),
+                'source' => __('Source', 'suple-speed'),
+                'canMerge' => __('Can merge', 'suple-speed'),
+                'canDefer' => __('Can defer', 'suple-speed'),
+                'css' => __('CSS', 'suple-speed'),
+                'js' => __('JS', 'suple-speed'),
+                'manual' => __('Manual', 'suple-speed'),
+                'auto' => __('Automatic', 'suple-speed'),
+                'noHandles' => __('No handles available yet.', 'suple-speed'),
+                'noBundles' => __('No bundles have been generated yet. They will appear here after the next optimization run.', 'suple-speed'),
+                'bundlesType' => __('Type', 'suple-speed'),
+                'bundlesGroup' => __('Group', 'suple-speed'),
+                'bundlesIdentifier' => __('Identifier', 'suple-speed'),
+                'bundlesVersion' => __('Version', 'suple-speed'),
+                'bundlesGenerated' => __('Generated', 'suple-speed'),
+                'bundlesHandles' => __('Handles', 'suple-speed'),
+                'bundlesSize' => __('Size', 'suple-speed'),
+                'groupPrefix' => __('Group', 'suple-speed'),
+                'scanPlaceholder' => __('Run a scan to populate the detected handles list and review their current classification.', 'suple-speed')
+            ],
             'strings' => [
                 'confirmReset' => __('Are you sure you want to reset all settings?', 'suple-speed'),
                 'confirmPurge' => __('Are you sure you want to purge all cache?', 'suple-speed'),
@@ -590,9 +639,101 @@ class Admin {
             'imported_from_version' => $import_data['version'] ?? 'unknown'
         ]);
     }
-    
+
+    /**
+     * AJAX: Guardar overrides manuales de assets
+     */
+    public function ajax_save_manual_asset_groups() {
+        check_ajax_referer('suple_speed_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_die('Unauthorized');
+        }
+
+        $manual_groups = $_POST['manual_groups'] ?? [];
+
+        if (!is_array($manual_groups)) {
+            $manual_groups = [];
+        }
+
+        if (!function_exists('suple_speed') || !isset(suple_speed()->assets)) {
+            wp_send_json_error(__('Assets module not available', 'suple-speed'));
+        }
+
+        $assets_module = suple_speed()->assets;
+        $valid_groups = array_keys($assets_module->get_asset_group_labels());
+        $sanitized = [];
+
+        foreach ($manual_groups as $handle => $group) {
+            $handle_key = sanitize_key($handle);
+            $group_key = strtoupper(sanitize_text_field($group));
+
+            if (empty($handle_key) || !in_array($group_key, $valid_groups, true)) {
+                continue;
+            }
+
+            $sanitized[$handle_key] = $group_key;
+        }
+
+        ksort($sanitized);
+
+        $option_name = 'suple_speed_assets_manual_groups';
+        $previous = get_option($option_name, []);
+
+        if (!is_array($previous)) {
+            $previous = [];
+        }
+
+        $changed = $sanitized !== $previous;
+
+        if ($changed) {
+            update_option($option_name, $sanitized);
+            $assets_module->set_manual_groups($sanitized);
+        } else {
+            $assets_module->set_manual_groups($previous);
+        }
+
+        $bundles = $assets_module->get_bundle_status();
+
+        wp_send_json_success([
+            'message' => __('Manual group assignments saved.', 'suple-speed'),
+            'manual_groups' => $sanitized,
+            'needs_regeneration' => $changed,
+            'bundles' => $bundles
+        ]);
+    }
+
+    /**
+     * AJAX: Regenerar bundles de assets
+     */
+    public function ajax_regenerate_asset_bundles() {
+        check_ajax_referer('suple_speed_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_die('Unauthorized');
+        }
+
+        if (!function_exists('suple_speed') || !isset(suple_speed()->assets)) {
+            wp_send_json_error(__('Assets module not available', 'suple-speed'));
+        }
+
+        $assets_module = suple_speed()->assets;
+        $removed = $assets_module->purge_asset_cache();
+        $bundles = $assets_module->get_bundle_status();
+
+        $message = sprintf(
+            __('Asset bundles cleared. %1$s They will regenerate on the next page load.', 'suple-speed'),
+            sprintf(_n('%d file removed.', '%d files removed.', $removed, 'suple-speed'), $removed)
+        );
+
+        wp_send_json_success([
+            'message' => $message,
+            'bundles' => $bundles
+        ]);
+    }
+
     // === UTILIDADES ===
-    
+
     /**
      * Obtener datos del dashboard
      */
