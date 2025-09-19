@@ -49,6 +49,7 @@ class SupleSpeed {
     public $assets;
     public $fonts;
     public $images;
+    public $critical_css_generator;
     public $psi;
     public $rules;
     public $logger;
@@ -146,6 +147,7 @@ class SupleSpeed {
         require_once SUPLE_SPEED_PLUGIN_DIR . 'includes/class-assets.php';
         require_once SUPLE_SPEED_PLUGIN_DIR . 'includes/class-fonts.php';
         require_once SUPLE_SPEED_PLUGIN_DIR . 'includes/class-images.php';
+        require_once SUPLE_SPEED_PLUGIN_DIR . 'includes/class-critical-css-generator.php';
         require_once SUPLE_SPEED_PLUGIN_DIR . 'includes/class-psi.php';
         require_once SUPLE_SPEED_PLUGIN_DIR . 'includes/class-admin.php';
         
@@ -159,6 +161,7 @@ class SupleSpeed {
         $this->assets = new SupleSpeed\Assets();
         $this->fonts = new SupleSpeed\Fonts();
         $this->images = new SupleSpeed\Images();
+        $this->critical_css_generator = new SupleSpeed\Critical_CSS_Generator();
         $this->psi = new SupleSpeed\PSI();
         
         // Admin solo en el backend
