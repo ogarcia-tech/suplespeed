@@ -216,7 +216,7 @@ class Admin {
         $boolean_settings = [
             'cache_enabled', 'compression_enabled', 'assets_enabled',
             'merge_css', 'merge_js', 'minify_css', 'minify_js', 'defer_js',
-            'critical_css_enabled', 'fonts_local', 'images_lazy', 'images_lqip',
+            'critical_css_enabled', 'fonts_local', 'fonts_display_swap', 'images_lazy', 'images_lqip',
             'images_webp_rewrite', 'elementor_compat', 'safe_mode',
             'multisite_network', 'assets_test_mode', 'psi_auto_test'
         ];

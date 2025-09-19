@@ -440,10 +440,25 @@ class Assets {
         if (!empty($merged_content)) {
             // Optimizaciones finales
             $merged_content = $this->optimize_final_css($merged_content);
-            
+
+            if (function_exists('suple_speed')) {
+                $fonts_module = suple_speed()->fonts ?? null;
+
+                if ($fonts_module && method_exists($fonts_module, 'enforce_font_display_swap')) {
+                    $result = $fonts_module->enforce_font_display_swap(
+                        $merged_content,
+                        'merged_css_' . strtolower($group)
+                    );
+
+                    if (is_array($result) && isset($result['css'])) {
+                        $merged_content = $result['css'];
+                    }
+                }
+            }
+
             // Guardar archivo
             $bytes_written = file_put_contents($merged_file, $merged_content);
-            
+
             if ($bytes_written !== false) {
                 // Guardar metadatos
                 $this->save_merge_metadata($merged_file, [
