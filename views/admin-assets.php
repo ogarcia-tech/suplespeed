@@ -1,11 +1,12 @@
 <?php
 /**
- * Página de optimización de assets
+ * Legacy view wrapper.
  */
 
 if (!defined('ABSPATH')) {
     exit;
 }
+
 
 $current_settings = $this->get_current_settings();
 $compat_module = function_exists('suple_speed') ? suple_speed()->compat : null;
@@ -231,3 +232,4 @@ if ($assets_module) {
         </div>
     </div>
 </div>
+
