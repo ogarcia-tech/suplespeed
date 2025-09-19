@@ -280,9 +280,9 @@ class Admin {
         ];
         
         foreach ($array_settings as $setting) {
-            $sanitized[$setting] = isset($input[$setting]) && is_array($input[$setting]) ?
-                                   array_map('sanitize_text_field', $input[$setting]) :
-                                   [];
+            $sanitized[$setting] = isset($input[$setting])
+                ? $this->normalize_list_setting($input[$setting])
+                : [];
 
             if ($setting === 'assets_async_css_groups') {
                 $sanitized[$setting] = array_values(array_unique(array_intersect(
@@ -300,6 +300,37 @@ class Admin {
 
 
         return $sanitized;
+    }
+
+    /**
+     * Normalizar valores de listas provenientes de textareas o arrays
+     */
+    private function normalize_list_setting($value) {
+        if (is_string($value)) {
+            $value = preg_split('/[\r\n,]+/', $value);
+        }
+
+        if (!is_array($value)) {
+            return [];
+        }
+
+        $normalized = [];
+
+        foreach ($value as $item) {
+            if (is_array($item) || is_object($item)) {
+                continue;
+            }
+
+            $item = is_string($item) ? trim($item) : trim((string) $item);
+
+            if ($item === '') {
+                continue;
+            }
+
+            $normalized[] = sanitize_text_field($item);
+        }
+
+        return $normalized;
     }
     
     /**
