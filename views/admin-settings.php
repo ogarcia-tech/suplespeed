@@ -56,8 +56,10 @@ if ($assets_module && method_exists($assets_module, 'get_preload_recommendations
                     <div class="suple-form-row">
                         <div class="suple-form-toggle">
                             <div class="suple-toggle">
-                                <input type="checkbox" id="safe_mode" name="safe_mode" <?php checked($current_settings['safe_mode'] ?? false); ?>>
-                                <span class="suple-toggle-slider"></span>
+                                <label for="safe_mode">
+                                    <input type="checkbox" id="safe_mode" name="safe_mode" <?php checked($current_settings['safe_mode'] ?? false); ?>>
+                                    <span class="suple-toggle-slider"></span>
+                                </label>
                             </div>
                             <label for="safe_mode" class="suple-form-label"><?php _e('Safe Mode', 'suple-speed'); ?></label>
                         </div>
@@ -70,8 +72,10 @@ if ($assets_module && method_exists($assets_module, 'get_preload_recommendations
                     <div class="suple-form-row">
                         <div class="suple-form-toggle">
                             <div class="suple-toggle">
-                                <input type="checkbox" id="elementor_compat" name="elementor_compat" <?php checked($current_settings['elementor_compat'] ?? true); ?>>
-                                <span class="suple-toggle-slider"></span>
+                                <label for="elementor_compat">
+                                    <input type="checkbox" id="elementor_compat" name="elementor_compat" <?php checked($current_settings['elementor_compat'] ?? true); ?>>
+                                    <span class="suple-toggle-slider"></span>
+                                </label>
                             </div>
                             <label for="elementor_compat" class="suple-form-label"><?php _e('Elementor Compatibility Mode', 'suple-speed'); ?></label>
                         </div>
@@ -99,8 +103,10 @@ if ($assets_module && method_exists($assets_module, 'get_preload_recommendations
                     <div class="suple-form-row">
                         <div class="suple-form-toggle">
                             <div class="suple-toggle">
-                                <input type="checkbox" id="multisite_network" name="multisite_network" <?php checked($current_settings['multisite_network'] ?? false); ?>>
-                                <span class="suple-toggle-slider"></span>
+                                <label for="multisite_network">
+                                    <input type="checkbox" id="multisite_network" name="multisite_network" <?php checked($current_settings['multisite_network'] ?? false); ?>>
+                                    <span class="suple-toggle-slider"></span>
+                                </label>
                             </div>
                             <label for="multisite_network" class="suple-form-label"><?php _e('Network Wide Settings', 'suple-speed'); ?></label>
                         </div>
@@ -122,8 +128,10 @@ if ($assets_module && method_exists($assets_module, 'get_preload_recommendations
                     <div class="suple-form-row">
                         <div class="suple-form-toggle">
                             <div class="suple-toggle">
-                                <input type="checkbox" id="cache_enabled" name="cache_enabled" <?php checked($current_settings['cache_enabled'] ?? true); ?>>
-                                <span class="suple-toggle-slider"></span>
+                                <label for="cache_enabled">
+                                    <input type="checkbox" id="cache_enabled" name="cache_enabled" <?php checked($current_settings['cache_enabled'] ?? true); ?>>
+                                    <span class="suple-toggle-slider"></span>
+                                </label>
                             </div>
                             <label for="cache_enabled" class="suple-form-label"><?php _e('Enable Page Cache', 'suple-speed'); ?></label>
                         </div>
@@ -149,8 +157,10 @@ if ($assets_module && method_exists($assets_module, 'get_preload_recommendations
                     <div class="suple-form-row">
                         <div class="suple-form-toggle">
                             <div class="suple-toggle">
-                                <input type="checkbox" id="compression_enabled" name="compression_enabled" <?php checked($current_settings['compression_enabled'] ?? true); ?>>
-                                <span class="suple-toggle-slider"></span>
+                                <label for="compression_enabled">
+                                    <input type="checkbox" id="compression_enabled" name="compression_enabled" <?php checked($current_settings['compression_enabled'] ?? true); ?>>
+                                    <span class="suple-toggle-slider"></span>
+                                </label>
                             </div>
                             <label for="compression_enabled" class="suple-form-label"><?php _e('Enable Compression', 'suple-speed'); ?></label>
                         </div>
@@ -183,8 +193,10 @@ if ($assets_module && method_exists($assets_module, 'get_preload_recommendations
                     <div class="suple-form-row">
                         <div class="suple-form-toggle">
                             <div class="suple-toggle">
-                                <input type="checkbox" id="assets_enabled" name="assets_enabled" <?php checked($current_settings['assets_enabled'] ?? true); ?>>
-                                <span class="suple-toggle-slider"></span>
+                                <label for="assets_enabled">
+                                    <input type="checkbox" id="assets_enabled" name="assets_enabled" <?php checked($current_settings['assets_enabled'] ?? true); ?>>
+                                    <span class="suple-toggle-slider"></span>
+                                </label>
                             </div>
                             <label for="assets_enabled" class="suple-form-label"><?php _e('Enable Assets Optimization', 'suple-speed'); ?></label>
                         </div>
@@ -199,16 +211,20 @@ if ($assets_module && method_exists($assets_module, 'get_preload_recommendations
                         
                         <div class="suple-form-toggle suple-mb-1">
                             <div class="suple-toggle">
-                                <input type="checkbox" id="merge_css" name="merge_css" <?php checked($current_settings['merge_css'] ?? true); ?>>
-                                <span class="suple-toggle-slider"></span>
+                                <label for="merge_css">
+                                    <input type="checkbox" id="merge_css" name="merge_css" <?php checked($current_settings['merge_css'] ?? true); ?>>
+                                    <span class="suple-toggle-slider"></span>
+                                </label>
                             </div>
                             <label for="merge_css" class="suple-form-label"><?php _e('Merge CSS Files', 'suple-speed'); ?></label>
                         </div>
 
                         <div class="suple-form-toggle">
                             <div class="suple-toggle">
-                                <input type="checkbox" id="minify_css" name="minify_css" <?php checked($current_settings['minify_css'] ?? true); ?>>
-                                <span class="suple-toggle-slider"></span>
+                                <label for="minify_css">
+                                    <input type="checkbox" id="minify_css" name="minify_css" <?php checked($current_settings['minify_css'] ?? true); ?>>
+                                    <span class="suple-toggle-slider"></span>
+                                </label>
                             </div>
                             <label for="minify_css" class="suple-form-label"><?php _e('Minify CSS', 'suple-speed'); ?></label>
                         </div>
@@ -220,24 +236,30 @@ if ($assets_module && method_exists($assets_module, 'get_preload_recommendations
                         
                         <div class="suple-form-toggle suple-mb-1">
                             <div class="suple-toggle">
-                                <input type="checkbox" id="merge_js" name="merge_js" <?php checked($current_settings['merge_js'] ?? true); ?>>
-                                <span class="suple-toggle-slider"></span>
+                                <label for="merge_js">
+                                    <input type="checkbox" id="merge_js" name="merge_js" <?php checked($current_settings['merge_js'] ?? true); ?>>
+                                    <span class="suple-toggle-slider"></span>
+                                </label>
                             </div>
                             <label for="merge_js" class="suple-form-label"><?php _e('Merge JavaScript Files', 'suple-speed'); ?></label>
                         </div>
 
                         <div class="suple-form-toggle suple-mb-1">
                             <div class="suple-toggle">
-                                <input type="checkbox" id="minify_js" name="minify_js" <?php checked($current_settings['minify_js'] ?? true); ?>>
-                                <span class="suple-toggle-slider"></span>
+                                <label for="minify_js">
+                                    <input type="checkbox" id="minify_js" name="minify_js" <?php checked($current_settings['minify_js'] ?? true); ?>>
+                                    <span class="suple-toggle-slider"></span>
+                                </label>
                             </div>
                             <label for="minify_js" class="suple-form-label"><?php _e('Minify JavaScript', 'suple-speed'); ?></label>
                         </div>
 
                         <div class="suple-form-toggle">
                             <div class="suple-toggle">
-                                <input type="checkbox" id="defer_js" name="defer_js" <?php checked($current_settings['defer_js'] ?? true); ?>>
-                                <span class="suple-toggle-slider"></span>
+                                <label for="defer_js">
+                                    <input type="checkbox" id="defer_js" name="defer_js" <?php checked($current_settings['defer_js'] ?? true); ?>>
+                                    <span class="suple-toggle-slider"></span>
+                                </label>
                             </div>
                             <label for="defer_js" class="suple-form-label"><?php _e('Defer JavaScript Loading', 'suple-speed'); ?></label>
                         </div>
@@ -247,8 +269,10 @@ if ($assets_module && method_exists($assets_module, 'get_preload_recommendations
                     <div class="suple-form-row">
                         <div class="suple-form-toggle">
                             <div class="suple-toggle">
-                                <input type="checkbox" id="assets_test_mode" name="assets_test_mode" <?php checked($current_settings['assets_test_mode'] ?? false); ?>>
-                                <span class="suple-toggle-slider"></span>
+                                <label for="assets_test_mode">
+                                    <input type="checkbox" id="assets_test_mode" name="assets_test_mode" <?php checked($current_settings['assets_test_mode'] ?? false); ?>>
+                                    <span class="suple-toggle-slider"></span>
+                                </label>
                             </div>
                             <label for="assets_test_mode" class="suple-form-label"><?php _e('Test Mode', 'suple-speed'); ?></label>
                         </div>
@@ -352,8 +376,10 @@ if ($assets_module && method_exists($assets_module, 'get_preload_recommendations
                     <div class="suple-form-row">
                         <div class="suple-form-toggle">
                             <div class="suple-toggle">
-                                <input type="checkbox" id="critical_css_enabled" name="critical_css_enabled" <?php checked($current_settings['critical_css_enabled'] ?? false); ?>>
-                                <span class="suple-toggle-slider"></span>
+                                <label for="critical_css_enabled">
+                                    <input type="checkbox" id="critical_css_enabled" name="critical_css_enabled" <?php checked($current_settings['critical_css_enabled'] ?? false); ?>>
+                                    <span class="suple-toggle-slider"></span>
+                                </label>
                             </div>
                             <label for="critical_css_enabled" class="suple-form-label"><?php _e('Enable Critical CSS', 'suple-speed'); ?></label>
                         </div>
@@ -386,8 +412,10 @@ if ($assets_module && method_exists($assets_module, 'get_preload_recommendations
                     <div class="suple-form-row">
                         <div class="suple-form-toggle">
                             <div class="suple-toggle">
-                                <input type="checkbox" id="fonts_local" name="fonts_local" <?php checked($current_settings['fonts_local'] ?? true); ?>>
-                                <span class="suple-toggle-slider"></span>
+                                <label for="fonts_local">
+                                    <input type="checkbox" id="fonts_local" name="fonts_local" <?php checked($current_settings['fonts_local'] ?? true); ?>>
+                                    <span class="suple-toggle-slider"></span>
+                                </label>
                             </div>
                             <label for="fonts_local" class="suple-form-label"><?php _e('Localize Google Fonts', 'suple-speed'); ?></label>
                         </div>
@@ -400,8 +428,10 @@ if ($assets_module && method_exists($assets_module, 'get_preload_recommendations
                     <div class="suple-form-row">
                         <div class="suple-form-toggle">
                             <div class="suple-toggle">
-                                <input type="checkbox" id="fonts_display_swap" name="fonts_display_swap" <?php checked($current_settings['fonts_display_swap'] ?? true); ?>>
-                                <span class="suple-toggle-slider"></span>
+                                <label for="fonts_display_swap">
+                                    <input type="checkbox" id="fonts_display_swap" name="fonts_display_swap" <?php checked($current_settings['fonts_display_swap'] ?? true); ?>>
+                                    <span class="suple-toggle-slider"></span>
+                                </label>
                             </div>
                             <label for="fonts_display_swap" class="suple-form-label"><?php _e('Add font-display: swap to local fonts', 'suple-speed'); ?></label>
                         </div>
@@ -432,8 +462,10 @@ if ($assets_module && method_exists($assets_module, 'get_preload_recommendations
                     <div class="suple-form-row">
                         <div class="suple-form-toggle">
                             <div class="suple-toggle">
-                                <input type="checkbox" id="images_lazy" name="images_lazy" <?php checked($current_settings['images_lazy'] ?? true); ?>>
-                                <span class="suple-toggle-slider"></span>
+                                <label for="images_lazy">
+                                    <input type="checkbox" id="images_lazy" name="images_lazy" <?php checked($current_settings['images_lazy'] ?? true); ?>>
+                                    <span class="suple-toggle-slider"></span>
+                                </label>
                             </div>
                             <label for="images_lazy" class="suple-form-label"><?php _e('Enable Lazy Loading', 'suple-speed'); ?></label>
                         </div>
@@ -446,8 +478,10 @@ if ($assets_module && method_exists($assets_module, 'get_preload_recommendations
                     <div class="suple-form-row">
                         <div class="suple-form-toggle">
                             <div class="suple-toggle">
-                                <input type="checkbox" id="images_lqip" name="images_lqip" <?php checked($current_settings['images_lqip'] ?? false); ?>>
-                                <span class="suple-toggle-slider"></span>
+                                <label for="images_lqip">
+                                    <input type="checkbox" id="images_lqip" name="images_lqip" <?php checked($current_settings['images_lqip'] ?? false); ?>>
+                                    <span class="suple-toggle-slider"></span>
+                                </label>
                             </div>
                             <label for="images_lqip" class="suple-form-label"><?php _e('Low Quality Image Placeholders (LQIP)', 'suple-speed'); ?></label>
                         </div>
@@ -460,8 +494,10 @@ if ($assets_module && method_exists($assets_module, 'get_preload_recommendations
                     <div class="suple-form-row">
                         <div class="suple-form-toggle">
                             <div class="suple-toggle">
-                                <input type="checkbox" id="images_webp_rewrite" name="images_webp_rewrite" <?php checked($current_settings['images_webp_rewrite'] ?? false); ?>>
-                                <span class="suple-toggle-slider"></span>
+                                <label for="images_webp_rewrite">
+                                    <input type="checkbox" id="images_webp_rewrite" name="images_webp_rewrite" <?php checked($current_settings['images_webp_rewrite'] ?? false); ?>>
+                                    <span class="suple-toggle-slider"></span>
+                                </label>
                             </div>
                             <label for="images_webp_rewrite" class="suple-form-label"><?php _e('WebP/AVIF Conversion', 'suple-speed'); ?></label>
                         </div>
@@ -513,8 +549,10 @@ if ($assets_module && method_exists($assets_module, 'get_preload_recommendations
                     <div class="suple-form-row">
                         <div class="suple-form-toggle">
                             <div class="suple-toggle">
-                                <input type="checkbox" id="psi_auto_test" name="psi_auto_test" <?php checked($current_settings['psi_auto_test'] ?? false); ?>>
-                                <span class="suple-toggle-slider"></span>
+                                <label for="psi_auto_test">
+                                    <input type="checkbox" id="psi_auto_test" name="psi_auto_test" <?php checked($current_settings['psi_auto_test'] ?? false); ?>>
+                                    <span class="suple-toggle-slider"></span>
+                                </label>
                             </div>
                             <label for="psi_auto_test" class="suple-form-label"><?php _e('Auto-test After Changes', 'suple-speed'); ?></label>
                         </div>

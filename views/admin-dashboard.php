@@ -1610,8 +1610,10 @@ if (empty($active_tab) || !isset($tabs[$active_tab])) {
                         <div class="suple-form-row">
                             <div class="suple-form-toggle">
                                 <div class="suple-toggle">
-                                    <input type="checkbox" id="cdn-cloudflare-enabled" name="cdn_cloudflare_enabled" <?php checked($cloudflare_cdn['enabled']); ?>>
-                                    <span class="suple-toggle-slider"></span>
+                                    <label for="cdn-cloudflare-enabled">
+                                        <input type="checkbox" id="cdn-cloudflare-enabled" name="cdn_cloudflare_enabled" <?php checked($cloudflare_cdn['enabled']); ?>>
+                                        <span class="suple-toggle-slider"></span>
+                                    </label>
                                 </div>
                                 <label for="cdn-cloudflare-enabled" class="suple-form-label"><?php _e('Enable Cloudflare purging', 'suple-speed'); ?></label>
                             </div>
@@ -1637,8 +1639,10 @@ if (empty($active_tab) || !isset($tabs[$active_tab])) {
                         <div class="suple-form-row">
                             <div class="suple-form-toggle">
                                 <div class="suple-toggle">
-                                    <input type="checkbox" id="cdn-bunny-enabled" name="cdn_bunnycdn_enabled" <?php checked($bunnycdn_cdn['enabled']); ?>>
-                                    <span class="suple-toggle-slider"></span>
+                                    <label for="cdn-bunny-enabled">
+                                        <input type="checkbox" id="cdn-bunny-enabled" name="cdn_bunnycdn_enabled" <?php checked($bunnycdn_cdn['enabled']); ?>>
+                                        <span class="suple-toggle-slider"></span>
+                                    </label>
                                 </div>
                                 <label for="cdn-bunny-enabled" class="suple-form-label"><?php _e('Enable BunnyCDN purging', 'suple-speed'); ?></label>
                             </div>
