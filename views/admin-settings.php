@@ -90,6 +90,7 @@ if ($assets_module && method_exists($assets_module, 'get_preload_recommendations
                         <select id="log_level" name="log_level" class="suple-form-input">
                             <option value="debug" <?php selected($current_settings['log_level'] ?? 'info', 'debug'); ?>><?php _e('Debug', 'suple-speed'); ?></option>
                             <option value="info" <?php selected($current_settings['log_level'] ?? 'info', 'info'); ?>><?php _e('Info', 'suple-speed'); ?></option>
+                            <option value="notice" <?php selected($current_settings['log_level'] ?? 'info', 'notice'); ?>><?php _e('Notice', 'suple-speed'); ?></option>
                             <option value="warning" <?php selected($current_settings['log_level'] ?? 'info', 'warning'); ?>><?php _e('Warning', 'suple-speed'); ?></option>
                             <option value="error" <?php selected($current_settings['log_level'] ?? 'info', 'error'); ?>><?php _e('Error', 'suple-speed'); ?></option>
                         </select>

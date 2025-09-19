@@ -12,6 +12,7 @@ class Logger {
      */
     const LEVEL_DEBUG = 'debug';
     const LEVEL_INFO = 'info';
+    const LEVEL_NOTICE = 'notice';
     const LEVEL_WARNING = 'warning';
     const LEVEL_ERROR = 'error';
     const LEVEL_CRITICAL = 'critical';
@@ -78,7 +79,14 @@ class Logger {
     public function info($message, $context = [], $module = 'general') {
         $this->log(self::LEVEL_INFO, $message, $context, $module);
     }
-    
+
+    /**
+     * Log de notice
+     */
+    public function notice($message, $context = [], $module = 'general') {
+        $this->log(self::LEVEL_NOTICE, $message, $context, $module);
+    }
+
     /**
      * Log de warning
      */
@@ -107,14 +115,15 @@ class Logger {
         $levels = [
             self::LEVEL_DEBUG => 0,
             self::LEVEL_INFO => 1,
-            self::LEVEL_WARNING => 2,
-            self::LEVEL_ERROR => 3,
-            self::LEVEL_CRITICAL => 4
+            self::LEVEL_NOTICE => 2,
+            self::LEVEL_WARNING => 3,
+            self::LEVEL_ERROR => 4,
+            self::LEVEL_CRITICAL => 5,
         ];
-        
+
         $current_level = $levels[$this->log_level] ?? 1;
         $message_level = $levels[$level] ?? 1;
-        
+
         return $message_level >= $current_level;
     }
     
