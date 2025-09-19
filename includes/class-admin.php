@@ -253,6 +253,7 @@ class Admin {
         $array_settings = [
             'cache_exclude_params', 'assets_exclude_handles', 
             'assets_no_defer_handles', 'assets_merge_css_groups',
+            'assets_async_css_groups',
             'assets_merge_js_groups', 'cache_vary_cookies',
             'assets_test_roles', 'assets_test_ips', 'preload_assets',
             'fonts_preload', 'images_preload'
@@ -262,8 +263,15 @@ class Admin {
             $sanitized[$setting] = isset($input[$setting]) && is_array($input[$setting]) ?
                                    array_map('sanitize_text_field', $input[$setting]) :
                                    [];
+
+            if ($setting === 'assets_async_css_groups') {
+                $sanitized[$setting] = array_values(array_unique(array_intersect(
+                    ['A', 'B', 'C', 'D'],
+                    array_map('strtoupper', $sanitized[$setting])
+                )));
+            }
         }
-        
+
         return $sanitized;
     }
     
