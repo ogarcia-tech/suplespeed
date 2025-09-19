@@ -127,7 +127,7 @@ if ($fonts_module && method_exists($fonts_module, 'get_font_preloads')) {
 }
 
 $asset_preloads = $current_settings['preload_assets'] ?? [];
-$critical_css   = $current_settings['critical_css'] ?? '';
+$critical_css   = $current_settings['critical_css_general'] ?? '';
 
 $compat_module = function_exists('suple_speed') ? suple_speed()->compat : null;
 $compat_report_defaults = [
@@ -734,8 +734,8 @@ $onboarding_critical_labels = array_map(function($step) {
                             <?php echo !empty($current_settings['compression_enabled']) ? esc_html__('Enabled', 'suple-speed') : esc_html__('Disabled', 'suple-speed'); ?>
                         </li>
                         <li>
-                            <strong><?php _e('Logged-in Cache', 'suple-speed'); ?>:</strong>
-                            <?php echo !empty($current_settings['cache_logged_users']) ? esc_html__('Enabled', 'suple-speed') : esc_html__('Disabled', 'suple-speed'); ?>
+                            <strong><?php _e('Critical CSS', 'suple-speed'); ?>:</strong>
+                            <?php echo !empty($current_settings['critical_css_enabled']) ? esc_html__('Enabled', 'suple-speed') : esc_html__('Disabled', 'suple-speed'); ?>
                         </li>
                     </ul>
                     <a class="suple-button" href="<?php echo esc_url(admin_url('admin.php?page=suple-speed-settings#tab-cache')); ?>">
@@ -951,7 +951,7 @@ $onboarding_critical_labels = array_map(function($step) {
                         </li>
                         <li>
                             <strong><?php _e('Modern Formats', 'suple-speed'); ?>:</strong>
-                            <?php echo !empty($current_settings['images_modern']) ? esc_html__('Enabled', 'suple-speed') : esc_html__('Disabled', 'suple-speed'); ?>
+                            <?php echo !empty($current_settings['images_webp_rewrite']) ? esc_html__('Enabled', 'suple-speed') : esc_html__('Disabled', 'suple-speed'); ?>
                         </li>
                     </ul>
                     <a class="suple-button" href="<?php echo esc_url(admin_url('admin.php?page=suple-speed-settings#tab-images')); ?>">
