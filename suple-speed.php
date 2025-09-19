@@ -428,6 +428,7 @@ class SupleSpeed {
         add_option('suple_speed_settings', $default_settings);
         add_option('suple_speed_version', SUPLE_SPEED_VERSION);
         add_option('suple_speed_rules', []);
+        add_option('suple_speed_onboarding', []);
     }
     
     /**

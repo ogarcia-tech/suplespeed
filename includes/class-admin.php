@@ -12,7 +12,12 @@ class Admin {
      */
     private $settings;
     private $logger;
-    
+
+    /**
+     * Pasos de onboarding
+     */
+    private $onboarding_steps;
+
     /**
      * Páginas de admin
      */
@@ -36,12 +41,13 @@ class Admin {
         add_action('admin_init', [$this, 'register_settings']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_scripts']);
         add_action('admin_notices', [$this, 'show_admin_notices']);
-        
+
         // AJAX handlers
         add_action('wp_ajax_suple_speed_save_settings', [$this, 'ajax_save_settings']);
         add_action('wp_ajax_suple_speed_reset_settings', [$this, 'ajax_reset_settings']);
         add_action('wp_ajax_suple_speed_export_settings', [$this, 'ajax_export_settings']);
         add_action('wp_ajax_suple_speed_import_settings', [$this, 'ajax_import_settings']);
+        add_action('wp_ajax_suple_speed_update_onboarding', [$this, 'ajax_update_onboarding']);
         
         // Plugin action links
         add_filter('plugin_action_links_' . SUPLE_SPEED_PLUGIN_BASENAME, [$this, 'add_action_links']);
@@ -197,6 +203,115 @@ class Admin {
         );
     }
     
+    /**
+     * Obtener pasos de onboarding del dashboard
+     */
+    public function get_onboarding_steps() {
+        if (is_array($this->onboarding_steps)) {
+            return $this->onboarding_steps;
+        }
+
+        $steps = [
+            'enable_cache' => [
+                'title' => __('Activa la caché inteligente', 'suple-speed'),
+                'description' => __('Habilita la caché a disco con purga automática e inteligente y un TTL de 24 horas como punto de partida recomendado.', 'suple-speed'),
+                'links' => [
+                    [
+                        'label' => __('Ir a Ajustes > Caché', 'suple-speed'),
+                        'url' => admin_url('admin.php?page=suple-speed-settings#tab-cache'),
+                    ],
+                    [
+                        'label' => __('Abrir herramientas de caché', 'suple-speed'),
+                        'url' => admin_url('admin.php?page=suple-speed-cache'),
+                        'secondary' => true,
+                    ],
+                ],
+                'badge' => __('Paso crítico', 'suple-speed'),
+                'badge_class' => 'warning',
+                'critical' => true,
+            ],
+            'configure_assets' => [
+                'title' => __('Optimiza y agrupa tus assets', 'suple-speed'),
+                'description' => __('Activa la fusión inteligente de CSS y JS respetando dependencias y comienza con los grupos A (Core/Theme) y B (Plugins), evitando el grupo C de Elementor hasta verificar compatibilidad.', 'suple-speed'),
+                'links' => [
+                    [
+                        'label' => __('Ir a Ajustes > Assets', 'suple-speed'),
+                        'url' => admin_url('admin.php?page=suple-speed-settings#tab-assets'),
+                    ],
+                    [
+                        'label' => __('Gestionar assets', 'suple-speed'),
+                        'url' => admin_url('admin.php?page=suple-speed-assets'),
+                        'secondary' => true,
+                    ],
+                ],
+                'badge' => __('Paso crítico', 'suple-speed'),
+                'badge_class' => 'warning',
+                'critical' => true,
+            ],
+            'psi_tests' => [
+                'title' => __('Configura PageSpeed Insights', 'suple-speed'),
+                'description' => __('Añade tu API key de PageSpeed Insights, ejecuta un test móvil y otro desktop y deja que Suple Speed genere sugerencias automáticas.', 'suple-speed'),
+                'links' => [
+                    [
+                        'label' => __('Ajustes > PageSpeed Insights', 'suple-speed'),
+                        'url' => admin_url('admin.php?page=suple-speed-settings#tab-psi'),
+                    ],
+                    [
+                        'label' => __('Lanzar primer test', 'suple-speed'),
+                        'url' => admin_url('admin.php?page=suple-speed-performance'),
+                        'secondary' => true,
+                    ],
+                ],
+                'badge' => __('Paso crítico', 'suple-speed'),
+                'badge_class' => 'warning',
+                'critical' => true,
+            ],
+            'local_fonts' => [
+                'title' => __('Localiza fuentes y precargas críticas', 'suple-speed'),
+                'description' => __('Descarga Google Fonts de forma local, aplica font-display: swap y configura los preloads recomendados para mejorar la primera pintura.', 'suple-speed'),
+                'links' => [
+                    [
+                        'label' => __('Ajustes > Fuentes', 'suple-speed'),
+                        'url' => admin_url('admin.php?page=suple-speed-settings#tab-fonts'),
+                    ],
+                    [
+                        'label' => __('Escanear y localizar fuentes', 'suple-speed'),
+                        'url' => admin_url('admin.php?page=suple-speed-fonts'),
+                        'secondary' => true,
+                    ],
+                ],
+                'badge' => __('Recomendado', 'suple-speed'),
+                'badge_class' => 'info',
+                'critical' => false,
+            ],
+        ];
+
+        if (class_exists('WooCommerce')) {
+            $steps['woocommerce_rules'] = [
+                'title' => __('Afina reglas para WooCommerce', 'suple-speed'),
+                'description' => __('Excluye checkout y carrito de la caché, mantén el modo test activo mientras ajustas optimizaciones y aplica reglas dedicadas para tu tienda.', 'suple-speed'),
+                'links' => [
+                    [
+                        'label' => __('Configurar reglas', 'suple-speed'),
+                        'url' => admin_url('admin.php?page=suple-speed-rules'),
+                    ],
+                    [
+                        'label' => __('Ver compatibilidad', 'suple-speed'),
+                        'url' => admin_url('admin.php?page=suple-speed-compatibility'),
+                        'secondary' => true,
+                    ],
+                ],
+                'badge' => __('Recomendado', 'suple-speed'),
+                'badge_class' => 'info',
+                'critical' => false,
+            ];
+        }
+
+        $this->onboarding_steps = $steps;
+
+        return $this->onboarding_steps;
+    }
+
     /**
      * Registrar configuraciones
      */
@@ -628,7 +743,69 @@ class Admin {
             'imported_from_version' => $import_data['version'] ?? 'unknown'
         ]);
     }
-    
+
+    /**
+     * AJAX: Guardar progreso del onboarding
+     */
+    public function ajax_update_onboarding() {
+        check_ajax_referer('suple_speed_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(__('Unauthorized', 'suple-speed'));
+        }
+
+        $step_key = sanitize_key($_POST['step'] ?? '');
+        $completed = isset($_POST['completed'])
+            ? filter_var($_POST['completed'], FILTER_VALIDATE_BOOLEAN)
+            : false;
+
+        $steps = $this->get_onboarding_steps();
+
+        if (empty($step_key) || !isset($steps[$step_key])) {
+            wp_send_json_error(__('Invalid onboarding step', 'suple-speed'));
+        }
+
+        $state = get_option('suple_speed_onboarding', []);
+        if (!is_array($state)) {
+            $state = [];
+        }
+
+        if ($completed) {
+            $state[$step_key] = true;
+        } else {
+            unset($state[$step_key]);
+        }
+
+        update_option('suple_speed_onboarding', $state);
+
+        $total_steps = count($steps);
+        $completed_steps = 0;
+
+        foreach ($steps as $key => $step) {
+            if (!empty($state[$key])) {
+                $completed_steps++;
+            }
+        }
+
+        $progress = $total_steps > 0 ? round(($completed_steps / $total_steps) * 100) : 0;
+
+        $remaining_critical = array_filter($steps, function($step, $key) use ($state) {
+            return !empty($step['critical']) && empty($state[$key]);
+        }, ARRAY_FILTER_USE_BOTH);
+
+        $remaining_labels = array_map(function($step) {
+            return wp_strip_all_tags($step['title']);
+        }, $remaining_critical);
+
+        wp_send_json_success([
+            'completed' => $completed_steps,
+            'total' => $total_steps,
+            'progress' => $progress,
+            'remaining_critical' => array_keys($remaining_critical),
+            'remaining_labels' => array_values($remaining_labels),
+        ]);
+    }
+
     // === UTILIDADES ===
     
     /**
