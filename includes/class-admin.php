@@ -253,8 +253,15 @@ class Admin {
         ];
         
         foreach ($numeric_settings as $setting => $default) {
-            $sanitized[$setting] = isset($input[$setting]) ? 
-                                   intval($input[$setting]) : 
+            if ($setting === 'cache_ttl') {
+                $sanitized[$setting] = isset($input[$setting])
+                    ? intval($input[$setting]) * HOUR_IN_SECONDS
+                    : $default;
+                continue;
+            }
+
+            $sanitized[$setting] = isset($input[$setting]) ?
+                                   intval($input[$setting]) :
                                    $default;
         }
         
