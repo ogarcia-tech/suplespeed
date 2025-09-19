@@ -311,18 +311,6 @@ if (empty($active_tab) || !isset($tabs[$active_tab])) {
     <!-- Navegación principal -->
     <?php include SUPLE_SPEED_PLUGIN_DIR . 'views/partials/admin-nav.php'; ?>
 
-    <!-- Tabs -->
-    <nav class="suple-dashboard-tabs">
-        <?php foreach ($tabs as $tab_slug => $tab_info): ?>
-            <a href="<?php echo esc_url($dashboard_link($tab_slug)); ?>"
-               class="suple-tab-button <?php echo $active_tab === $tab_slug ? 'is-active' : ''; ?>"
-               data-tab="<?php echo esc_attr($tab_slug); ?>">
-                <span class="dashicons <?php echo esc_attr($tab_info['icon']); ?>"></span>
-                <?php echo esc_html($tab_info['label']); ?>
-            </a>
-        <?php endforeach; ?>
-    </nav>
-
     <!-- Getting Started -->
     <?php if ($onboarding_total > 0): ?>
     <div class="suple-tab-panel <?php echo $active_tab === 'getting-started' ? 'is-active' : ''; ?>" data-tab="getting-started">
