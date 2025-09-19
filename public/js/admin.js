@@ -370,12 +370,45 @@
             const originalText = $button.text();
             
             const settings = {};
+            const arraySettings = {};
+
             $form.find('input, select, textarea').each(function() {
                 const $input = $(this);
-                const name = $input.attr('name');
-                
-                if (!name) return;
-                
+                const rawName = $input.attr('name');
+
+                if (!rawName) return;
+
+                const isArrayField = rawName.slice(-2) === '[]';
+                const name = isArrayField ? rawName.slice(0, -2) : rawName;
+
+                if (isArrayField) {
+                    if (!Array.isArray(arraySettings[name])) {
+                        arraySettings[name] = [];
+                    }
+
+                    if ($input.is(':checkbox')) {
+                        if ($input.is(':checked')) {
+                            arraySettings[name].push($input.val());
+                        }
+                    } else {
+                        const value = $input.val();
+
+                        if (value === null || typeof value === 'undefined') {
+                            return;
+                        }
+
+                        const isArrayValue = Array.isArray ? Array.isArray(value) : $.isArray(value);
+
+                        if (isArrayValue) {
+                            arraySettings[name] = arraySettings[name].concat(value);
+                        } else {
+                            arraySettings[name].push(value);
+                        }
+                    }
+
+                    return;
+                }
+
                 if ($input.is(':checkbox')) {
                     settings[name] = $input.is(':checked');
                 } else if ($input.is('[multiple]')) {
@@ -383,6 +416,10 @@
                 } else {
                     settings[name] = $input.val();
                 }
+            });
+
+            $.each(arraySettings, function(key, values) {
+                settings[key] = values;
             });
             
             $button.html('<span class="suple-spinner"></span> ' + supleSpeedAdmin.strings.processing);
@@ -1179,11 +1216,44 @@
             if ($targetForm.length === 0 || formAutoSave === false || formAutoSave === 'false') return;
 
             const settings = {};
+            const arraySettings = {};
+
             $targetForm.find('input, select, textarea').each(function() {
                 const $input = $(this);
-                const name = $input.attr('name');
+                const rawName = $input.attr('name');
 
-                if (!name) return;
+                if (!rawName) return;
+
+                const isArrayField = rawName.slice(-2) === '[]';
+                const name = isArrayField ? rawName.slice(0, -2) : rawName;
+
+                if (isArrayField) {
+                    if (!Array.isArray(arraySettings[name])) {
+                        arraySettings[name] = [];
+                    }
+
+                    if ($input.is(':checkbox')) {
+                        if ($input.is(':checked')) {
+                            arraySettings[name].push($input.val());
+                        }
+                    } else {
+                        const value = $input.val();
+
+                        if (value === null || typeof value === 'undefined') {
+                            return;
+                        }
+
+                        const isArrayValue = Array.isArray ? Array.isArray(value) : $.isArray(value);
+
+                        if (isArrayValue) {
+                            arraySettings[name] = arraySettings[name].concat(value);
+                        } else {
+                            arraySettings[name].push(value);
+                        }
+                    }
+
+                    return;
+                }
 
                 if ($input.is(':checkbox')) {
                     settings[name] = $input.is(':checked');
@@ -1192,6 +1262,10 @@
                 } else {
                     settings[name] = $input.val();
                 }
+            });
+
+            $.each(arraySettings, function(key, values) {
+                settings[key] = values;
             });
 
             let $indicator = $targetForm.data('autoSaveIndicator');
