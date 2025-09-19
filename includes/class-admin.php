@@ -712,7 +712,7 @@ class Admin {
         
         // Recrear configuración por defecto
         if (function_exists('suple_speed')) {
-            suple_speed()->set_default_options();
+            suple_speed()->reset_default_options();
         }
         
         wp_send_json_success([
