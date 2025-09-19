@@ -229,7 +229,8 @@ class Admin {
      */
     public function sanitize_settings($input) {
         $sanitized = [];
-        
+        $current_settings = get_option('suple_speed_settings', []);
+
         // Configuraciones booleanas
         $boolean_settings = [
             'cache_enabled', 'compression_enabled', 'assets_enabled',
@@ -287,6 +288,15 @@ class Admin {
         ];
         
         foreach ($array_settings as $setting) {
+            if ($setting === 'preload_assets') {
+                $existing = isset($current_settings[$setting]) && is_array($current_settings[$setting])
+                    ? $current_settings[$setting]
+                    : [];
+
+                $sanitized[$setting] = $this->sanitize_preload_assets($input[$setting] ?? null, $existing);
+                continue;
+            }
+
             $sanitized[$setting] = isset($input[$setting])
                 ? $this->normalize_list_setting($input[$setting])
                 : [];
@@ -305,6 +315,55 @@ class Admin {
             sanitize_textarea_field($input['images_critical_manual']) :
             '';
 
+
+        return $sanitized;
+    }
+
+    /**
+     * Sanitizar configuración de precarga de assets
+     */
+    private function sanitize_preload_assets($value, $existing = []) {
+        if ($value === null) {
+            return is_array($existing) ? $existing : [];
+        }
+
+        if (!is_array($value)) {
+            return is_array($existing) ? $existing : [];
+        }
+
+        $sanitized = [];
+
+        foreach ($value as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+
+            $url = esc_url_raw($entry['url'] ?? '');
+
+            if (empty($url)) {
+                continue;
+            }
+
+            $item = ['url' => $url];
+
+            if (!empty($entry['as'])) {
+                $item['as'] = sanitize_text_field($entry['as']);
+            }
+
+            if (!empty($entry['type'])) {
+                $item['type'] = sanitize_text_field($entry['type']);
+            }
+
+            if (!empty($entry['crossorigin'])) {
+                $item['crossorigin'] = sanitize_text_field($entry['crossorigin']);
+            }
+
+            if (!empty($entry['media'])) {
+                $item['media'] = sanitize_text_field($entry['media']);
+            }
+
+            $sanitized[] = $item;
+        }
 
         return $sanitized;
     }
@@ -371,6 +430,7 @@ class Admin {
         $asset_groups = [];
         $manual_overrides = [];
         $bundle_status = ['css' => [], 'js' => []];
+        $preload_recommendations = [];
 
         if (function_exists('suple_speed') && isset(suple_speed()->assets)) {
             $assets_module = suple_speed()->assets;
@@ -386,6 +446,10 @@ class Admin {
             if (method_exists($assets_module, 'get_bundle_status')) {
                 $bundle_status = $assets_module->get_bundle_status();
             }
+
+            if (method_exists($assets_module, 'get_preload_recommendations')) {
+                $preload_recommendations = $assets_module->get_preload_recommendations();
+            }
         }
 
         // Datos para JavaScript
@@ -395,6 +459,7 @@ class Admin {
             'assetGroups' => $asset_groups,
             'manualAssetGroups' => $manual_overrides,
             'bundleStatus' => $bundle_status,
+            'preloadRecommendations' => $preload_recommendations,
             'labels' => [
                 'handle' => __('Handle', 'suple-speed'),
                 'type' => __('Type', 'suple-speed'),
@@ -418,7 +483,12 @@ class Admin {
                 'bundlesHandles' => __('Handles', 'suple-speed'),
                 'bundlesSize' => __('Size', 'suple-speed'),
                 'groupPrefix' => __('Group', 'suple-speed'),
-                'scanPlaceholder' => __('Run a scan to populate the detected handles list and review their current classification.', 'suple-speed')
+                'scanPlaceholder' => __('Run a scan to populate the detected handles list and review their current classification.', 'suple-speed'),
+                'resource' => __('Resource', 'suple-speed'),
+                'size' => __('Size', 'suple-speed'),
+                'seenOn' => __('Seen on', 'suple-speed'),
+                'position' => __('Position', 'suple-speed'),
+                'actions' => __('Actions', 'suple-speed')
             ],
             'strings' => [
                 'confirmReset' => __('Are you sure you want to reset all settings?', 'suple-speed'),
@@ -427,7 +497,16 @@ class Admin {
                 'scanningHandles' => __('Scanning handles…', 'suple-speed'),
                 'scanHandlesError' => __('We could not retrieve the handles for this page.', 'suple-speed'),
                 'success' => __('Operation completed successfully', 'suple-speed'),
-                'error' => __('An error occurred', 'suple-speed')
+                'error' => __('An error occurred', 'suple-speed'),
+                'preloadCollecting' => __('Collecting critical assets…', 'suple-speed'),
+                'preloadCollectorError' => __('We could not analyze the popular pages right now. Please try again later.', 'suple-speed'),
+                'preloadAcceptSuccess' => __('Preload added successfully.', 'suple-speed'),
+                'preloadDismissed' => __('We will stop suggesting this asset.', 'suple-speed'),
+                'preloadNoSuggestions' => __('No preload suggestions available yet. Trigger a scan to populate this list.', 'suple-speed'),
+                'addPreload' => __('Add preload', 'suple-speed'),
+                'dismiss' => __('Dismiss', 'suple-speed'),
+                'unknown' => __('Unknown', 'suple-speed'),
+                'crossorigin' => __('Crossorigin', 'suple-speed')
             ]
         ]);
     }

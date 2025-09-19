@@ -8,6 +8,12 @@ if (!defined('ABSPATH')) {
 }
 
 $current_settings = $this->get_current_settings();
+$assets_module = function_exists('suple_speed') ? suple_speed()->assets : null;
+$preload_recommendations = [];
+
+if ($assets_module && method_exists($assets_module, 'get_preload_recommendations')) {
+    $preload_recommendations = $assets_module->get_preload_recommendations();
+}
 ?>
 
 <div class="suple-speed-admin">
@@ -251,6 +257,91 @@ $current_settings = $this->get_current_settings();
                         </div>
                     </div>
 
+                </div>
+
+                <div class="suple-card">
+                    <h3><?php _e('Preload Suggestions', 'suple-speed'); ?></h3>
+                    <p><?php _e('Review the assets detected on your most visited pages and decide which ones should be preloaded.', 'suple-speed'); ?></p>
+
+                    <div class="suple-flex suple-gap-1 suple-flex-wrap">
+                        <button type="button" class="suple-button suple-run-preload-collector">
+                            <span class="dashicons dashicons-update"></span>
+                            <?php _e('Analyze popular pages', 'suple-speed'); ?>
+                        </button>
+                        <button type="button" class="suple-button secondary suple-refresh-preload-recommendations">
+                            <span class="dashicons dashicons-update-alt"></span>
+                            <?php _e('Refresh suggestions', 'suple-speed'); ?>
+                        </button>
+                    </div>
+
+                    <div id="suple-preload-recommendations" class="suple-mt-2" data-empty-message="<?php esc_attr_e('No preload suggestions available yet. Trigger a scan to populate this list.', 'suple-speed'); ?>">
+                        <?php if (!empty($preload_recommendations)): ?>
+                            <table class="suple-table">
+                                <thead>
+                                    <tr>
+                                        <th><?php _e('Type', 'suple-speed'); ?></th>
+                                        <th><?php _e('Resource', 'suple-speed'); ?></th>
+                                        <th><?php _e('Size', 'suple-speed'); ?></th>
+                                        <th><?php _e('Seen on', 'suple-speed'); ?></th>
+                                        <th><?php _e('Position', 'suple-speed'); ?></th>
+                                        <th><?php _e('Actions', 'suple-speed'); ?></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($preload_recommendations as $recommendation): ?>
+                                        <?php
+                                        $type_label = $recommendation['type'] ?? ($recommendation['as'] ?? '');
+                                        $type_label = $type_label ? ucfirst($type_label) : __('Unknown', 'suple-speed');
+                                        $url = esc_url($recommendation['url'] ?? '');
+                                        $size_display = isset($recommendation['size']) ? size_format((int) $recommendation['size']) : '—';
+                                        $pages = $recommendation['pages'] ?? [];
+                                        $position = isset($recommendation['position']) ? (int) $recommendation['position'] : null;
+                                        ?>
+                                        <tr data-id="<?php echo esc_attr($recommendation['id'] ?? ''); ?>">
+                                            <td>
+                                                <span class="suple-badge"><?php echo esc_html($type_label); ?></span>
+                                                <?php if (!empty($recommendation['crossorigin'])): ?>
+                                                    <br><small><?php _e('Crossorigin', 'suple-speed'); ?>: <?php echo esc_html($recommendation['crossorigin']); ?></small>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td>
+                                                <?php if ($url): ?>
+                                                    <code><?php echo esc_html($url); ?></code>
+                                                <?php else: ?>
+                                                    &mdash;
+                                                <?php endif; ?>
+                                            </td>
+                                            <td><?php echo $size_display === '—' ? '&mdash;' : esc_html($size_display); ?></td>
+                                            <td>
+                                                <?php if (!empty($pages)): ?>
+                                                    <?php foreach ($pages as $page_url): ?>
+                                                        <div><a href="<?php echo esc_url($page_url); ?>" target="_blank" rel="noopener"><?php echo esc_html($page_url); ?></a></div>
+                                                    <?php endforeach; ?>
+                                                <?php else: ?>
+                                                    &mdash;
+                                                <?php endif; ?>
+                                            </td>
+                                            <td><?php echo $position ? '#' . esc_html($position) : '&mdash;'; ?></td>
+                                            <td>
+                                                <div class="suple-flex suple-gap-0-5 suple-flex-wrap">
+                                                    <button type="button" class="suple-button success suple-accept-preload" data-id="<?php echo esc_attr($recommendation['id'] ?? ''); ?>">
+                                                        <span class="dashicons dashicons-upload"></span>
+                                                        <?php _e('Add preload', 'suple-speed'); ?>
+                                                    </button>
+                                                    <button type="button" class="suple-button secondary suple-reject-preload" data-id="<?php echo esc_attr($recommendation['id'] ?? ''); ?>">
+                                                        <span class="dashicons dashicons-no-alt"></span>
+                                                        <?php _e('Dismiss', 'suple-speed'); ?>
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        <?php else: ?>
+                            <p class="suple-muted"><?php _e('No preload suggestions available yet. Trigger a scan to populate this list.', 'suple-speed'); ?></p>
+                        <?php endif; ?>
+                    </div>
                 </div>
 
                 <!-- Critical CSS -->
