@@ -35,15 +35,32 @@ if ($assets_module && method_exists($assets_module, 'get_preload_recommendations
         
         <!-- Tabs Navigation -->
         <div class="suple-tabs">
-            <div class="suple-tab-nav">
+            <div class="suple-tab-nav" role="tablist" aria-label="<?php esc_attr_e('Settings sections', 'suple-speed'); ?>">
                 <ul>
-                    <li><a href="#tab-general" class="active"><?php _e('General', 'suple-speed'); ?></a></li>
-                    <li><a href="#tab-cache"><?php _e('Cache', 'suple-speed'); ?></a></li>
-                    <li><a href="#tab-assets"><?php _e('Assets', 'suple-speed'); ?></a></li>
-                    <li><a href="#tab-fonts"><?php _e('Fonts', 'suple-speed'); ?></a></li>
-                    <li><a href="#tab-images"><?php _e('Images', 'suple-speed'); ?></a></li>
-                    <li><a href="#tab-psi"><?php _e('PageSpeed Insights', 'suple-speed'); ?></a></li>
-                    <li><a href="#tab-advanced"><?php _e('Advanced', 'suple-speed'); ?></a></li>
+                    <li role="presentation">
+                        <a href="#tab-general" class="active" role="tab" aria-controls="tab-general" aria-selected="true"><?php _e('General', 'suple-speed'); ?></a>
+                    </li>
+                    <li role="presentation">
+                        <a href="#tab-cache" role="tab" aria-controls="tab-cache" aria-selected="false"><?php _e('Cache', 'suple-speed'); ?></a>
+                    </li>
+                    <li role="presentation">
+                        <a href="#tab-assets" role="tab" aria-controls="tab-assets" aria-selected="false"><?php _e('Asset Optimization', 'suple-speed'); ?></a>
+                    </li>
+                    <li role="presentation">
+                        <a href="#tab-critical" role="tab" aria-controls="tab-critical" aria-selected="false"><?php _e('Critical & Preloads', 'suple-speed'); ?></a>
+                    </li>
+                    <li role="presentation">
+                        <a href="#tab-fonts" role="tab" aria-controls="tab-fonts" aria-selected="false"><?php _e('Fonts', 'suple-speed'); ?></a>
+                    </li>
+                    <li role="presentation">
+                        <a href="#tab-images" role="tab" aria-controls="tab-images" aria-selected="false"><?php _e('Images', 'suple-speed'); ?></a>
+                    </li>
+                    <li role="presentation">
+                        <a href="#tab-psi" role="tab" aria-controls="tab-psi" aria-selected="false"><?php _e('PageSpeed Insights', 'suple-speed'); ?></a>
+                    </li>
+                    <li role="presentation">
+                        <a href="#tab-advanced" role="tab" aria-controls="tab-advanced" aria-selected="false"><?php _e('Advanced', 'suple-speed'); ?></a>
+                    </li>
                 </ul>
             </div>
 
@@ -283,7 +300,9 @@ if ($assets_module && method_exists($assets_module, 'get_preload_recommendations
                     </div>
 
                 </div>
+            </div>
 
+            <div id="tab-critical" class="suple-tab-content">
                 <div class="suple-card">
                     <h3><?php _e('Preload Suggestions', 'suple-speed'); ?></h3>
                     <p><?php _e('Review the assets detected on your most visited pages and decide which ones should be preloaded.', 'suple-speed'); ?></p>
@@ -372,7 +391,7 @@ if ($assets_module && method_exists($assets_module, 'get_preload_recommendations
                 <!-- Critical CSS -->
                 <div class="suple-card">
                     <h3><?php _e('Critical CSS', 'suple-speed'); ?></h3>
-                    
+
                     <!-- Enable Critical CSS -->
                     <div class="suple-form-row">
                         <div class="suple-form-toggle">
@@ -392,9 +411,9 @@ if ($assets_module && method_exists($assets_module, 'get_preload_recommendations
                     <!-- General Critical CSS -->
                     <div class="suple-form-row">
                         <label for="critical_css_general" class="suple-form-label"><?php _e('General Critical CSS', 'suple-speed'); ?></label>
-                        <textarea id="critical_css_general" name="critical_css_general" class="suple-form-input suple-form-textarea" 
-                                  rows="8" placeholder="<?php _e('Paste your critical CSS here...', 'suple-speed'); ?>"><?php 
-                            echo esc_textarea($current_settings['critical_css_general'] ?? ''); 
+                        <textarea id="critical_css_general" name="critical_css_general" class="suple-form-input suple-form-textarea"
+                                  rows="8" placeholder="<?php _e('Paste your critical CSS here...', 'suple-speed'); ?>"><?php
+                            echo esc_textarea($current_settings['critical_css_general'] ?? '');
                         ?></textarea>
                         <div class="suple-form-help">
                             <?php _e('Critical CSS to be used on all pages. You can override this per page using rules.', 'suple-speed'); ?>
