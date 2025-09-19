@@ -128,6 +128,7 @@ if ($fonts_module && method_exists($fonts_module, 'get_font_preloads')) {
 
 $asset_preloads = $current_settings['preload_assets'] ?? [];
 $critical_css   = $current_settings['critical_css_general'] ?? '';
+
 $critical_css_status_defaults = [
     'status'       => 'idle',
     'message'      => '',
@@ -165,6 +166,7 @@ if (!empty($critical_css_status['duration'])) {
         );
     }
 }
+
 
 $compat_module = function_exists('suple_speed') ? suple_speed()->compat : null;
 $compat_report_defaults = [
@@ -236,6 +238,9 @@ if (!is_array($onboarding_state)) {
     $onboarding_state = [];
 }
 
+$onboarding_dismissed = !empty($onboarding_state['dismissed']);
+$onboarding_body_id   = 'suple-onboarding-body-' . uniqid();
+
 $onboarding_total = count($onboarding_steps);
 $onboarding_completed = 0;
 
@@ -288,36 +293,62 @@ $onboarding_critical_labels = array_map(function($step) {
 
     <!-- Getting Started -->
     <?php if ($onboarding_total > 0): ?>
-    <div class="suple-card suple-onboarding" data-total="<?php echo esc_attr($onboarding_total); ?>" data-completed="<?php echo esc_attr($onboarding_completed); ?>">
+    <div class="suple-card suple-onboarding <?php echo $onboarding_dismissed ? 'is-dismissed' : ''; ?>"
+         data-total="<?php echo esc_attr($onboarding_total); ?>"
+         data-completed="<?php echo esc_attr($onboarding_completed); ?>"
+         data-dismissed="<?php echo $onboarding_dismissed ? '1' : '0'; ?>">
         <div class="suple-onboarding-head">
-            <h3><?php _e('Guía rápida', 'suple-speed'); ?></h3>
-            <span class="suple-onboarding-progress-count"><?php echo esc_html(sprintf('%d/%d', $onboarding_completed, $onboarding_total)); ?></span>
-        </div>
-
-        <div class="suple-onboarding-progress">
-            <div class="suple-onboarding-progress-bar">
-                <span class="suple-onboarding-progress-bar-fill" style="width: <?php echo esc_attr($onboarding_progress); ?>%;"></span>
+            <div class="suple-onboarding-title">
+                <h3><?php _e('Guía rápida', 'suple-speed'); ?></h3>
+                <span class="suple-onboarding-progress-count"><?php echo esc_html(sprintf('%d/%d', $onboarding_completed, $onboarding_total)); ?></span>
             </div>
-            <span class="suple-onboarding-progress-label"><?php echo esc_html($onboarding_progress); ?>%</span>
+            <div class="suple-onboarding-actions">
+                <button type="button"
+                        class="suple-onboarding-toggle suple-onboarding-dismiss"
+                        aria-controls="<?php echo esc_attr($onboarding_body_id); ?>"
+                        aria-expanded="<?php echo $onboarding_dismissed ? 'false' : 'true'; ?>">
+                    <span class="dashicons dashicons-no-alt" aria-hidden="true"></span>
+                    <span><?php _e('Ocultar', 'suple-speed'); ?></span>
+                </button>
+                <button type="button"
+                        class="suple-onboarding-toggle suple-onboarding-reopen"
+                        aria-controls="<?php echo esc_attr($onboarding_body_id); ?>"
+                        aria-expanded="<?php echo $onboarding_dismissed ? 'false' : 'true'; ?>">
+                    <span class="dashicons dashicons-visibility" aria-hidden="true"></span>
+                    <span><?php _e('Mostrar', 'suple-speed'); ?></span>
+                </button>
+            </div>
         </div>
 
-        <p class="suple-onboarding-status <?php echo empty($onboarding_critical_remaining) ? 'success' : 'warning'; ?>"
-           data-warning-template="<?php echo esc_attr__('Quedan %1$s pasos críticos por completar: %2$s', 'suple-speed'); ?>"
-           data-success-text="<?php echo esc_attr__('¡Listo! Todas las optimizaciones críticas están activas.', 'suple-speed'); ?>">
-            <?php if (empty($onboarding_critical_remaining)): ?>
-                <?php _e('¡Listo! Todas las optimizaciones críticas están activas.', 'suple-speed'); ?>
-            <?php else: ?>
-                <?php
-                printf(
-                    esc_html__('Quedan %1$s pasos críticos por completar: %2$s', 'suple-speed'),
-                    count($onboarding_critical_remaining),
-                    esc_html(implode(', ', $onboarding_critical_labels))
-                );
-                ?>
-            <?php endif; ?>
+        <p class="suple-onboarding-collapsed-message" role="status">
+            <?php _e('Has ocultado la guía rápida. Puedes reabrirla cuando quieras.', 'suple-speed'); ?>
         </p>
 
-        <div class="suple-onboarding-steps">
+        <div class="suple-onboarding-body" id="<?php echo esc_attr($onboarding_body_id); ?>" aria-hidden="<?php echo $onboarding_dismissed ? 'true' : 'false'; ?>">
+            <div class="suple-onboarding-progress">
+                <div class="suple-onboarding-progress-bar">
+                    <span class="suple-onboarding-progress-bar-fill" style="width: <?php echo esc_attr($onboarding_progress); ?>%;"></span>
+                </div>
+                <span class="suple-onboarding-progress-label"><?php echo esc_html($onboarding_progress); ?>%</span>
+            </div>
+
+            <p class="suple-onboarding-status <?php echo empty($onboarding_critical_remaining) ? 'success' : 'warning'; ?>"
+               data-warning-template="<?php echo esc_attr__('Quedan %1$s pasos críticos por completar: %2$s', 'suple-speed'); ?>"
+               data-success-text="<?php echo esc_attr__('¡Listo! Todas las optimizaciones críticas están activas.', 'suple-speed'); ?>">
+                <?php if (empty($onboarding_critical_remaining)): ?>
+                    <?php _e('¡Listo! Todas las optimizaciones críticas están activas.', 'suple-speed'); ?>
+                <?php else: ?>
+                    <?php
+                    printf(
+                        esc_html__('Quedan %1$s pasos críticos por completar: %2$s', 'suple-speed'),
+                        count($onboarding_critical_remaining),
+                        esc_html(implode(', ', $onboarding_critical_labels))
+                    );
+                    ?>
+                <?php endif; ?>
+            </p>
+
+            <div class="suple-onboarding-steps">
             <?php foreach ($onboarding_steps as $step_key => $step):
                 $completed = !empty($onboarding_state[$step_key]);
                 $links = $step['links'] ?? [];
@@ -357,6 +388,7 @@ $onboarding_critical_labels = array_map(function($step) {
                 </div>
             </label>
             <?php endforeach; ?>
+            </div>
         </div>
     </div>
     <?php endif; ?>
@@ -771,8 +803,8 @@ $onboarding_critical_labels = array_map(function($step) {
                             <?php echo !empty($current_settings['compression_enabled']) ? esc_html__('Enabled', 'suple-speed') : esc_html__('Disabled', 'suple-speed'); ?>
                         </li>
                         <li>
-                            <strong><?php _e('Logged-in Cache', 'suple-speed'); ?>:</strong>
-                            <?php echo !empty($current_settings['cache_logged_users']) ? esc_html__('Enabled', 'suple-speed') : esc_html__('Disabled', 'suple-speed'); ?>
+                            <strong><?php _e('Critical CSS', 'suple-speed'); ?>:</strong>
+                            <?php echo !empty($current_settings['critical_css_enabled']) ? esc_html__('Enabled', 'suple-speed') : esc_html__('Disabled', 'suple-speed'); ?>
                         </li>
                     </ul>
                     <a class="suple-button" href="<?php echo esc_url(admin_url('admin.php?page=suple-speed-settings#tab-cache')); ?>">
@@ -1072,7 +1104,7 @@ $onboarding_critical_labels = array_map(function($step) {
                         </li>
                         <li>
                             <strong><?php _e('Modern Formats', 'suple-speed'); ?>:</strong>
-                            <?php echo !empty($current_settings['images_modern']) ? esc_html__('Enabled', 'suple-speed') : esc_html__('Disabled', 'suple-speed'); ?>
+                            <?php echo !empty($current_settings['images_webp_rewrite']) ? esc_html__('Enabled', 'suple-speed') : esc_html__('Disabled', 'suple-speed'); ?>
                         </li>
                     </ul>
                     <a class="suple-button" href="<?php echo esc_url(admin_url('admin.php?page=suple-speed-settings#tab-images')); ?>">
