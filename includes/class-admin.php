@@ -47,7 +47,6 @@ class Admin {
     private function init_hooks() {
         add_action('admin_menu', [$this, 'add_admin_menu']);
         add_action('admin_init', [$this, 'register_settings']);
-        add_action('admin_init', [$this, 'handle_legacy_page_redirects'], 1);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_scripts']);
         add_action('admin_notices', [$this, 'show_admin_notices']);
         add_action('admin_post_suple_speed_generate_critical_css', [$this, 'handle_generate_critical_css']);
@@ -725,123 +724,6 @@ class Admin {
         include SUPLE_SPEED_PLUGIN_DIR . 'views/admin-dashboard.php';
     }
 
-    /**
-     * Renderizar página de rendimiento
-     */
-    public function render_performance() {
-        $this->render_dashboard('performance');
-    }
-
-    /**
-     * Renderizar página de caché
-     */
-    public function render_cache() {
-        $this->render_dashboard('cache');
-    }
-
-    /**
-     * Renderizar página de assets
-     */
-    public function render_assets() {
-        $this->render_dashboard('assets');
-    }
-
-    /**
-     * Renderizar página de critical CSS
-     */
-    public function render_critical() {
-        $this->render_dashboard('critical');
-    }
-
-    /**
-     * Renderizar página de fuentes
-     */
-    public function render_fonts() {
-        $this->render_dashboard('fonts');
-    }
-
-    /**
-     * Renderizar página de imágenes
-     */
-    public function render_images() {
-        $this->render_dashboard('images');
-    }
-
-    /**
-     * Renderizar página de reglas
-     */
-    public function render_rules() {
-        $this->render_dashboard('rules');
-    }
-
-    /**
-     * Renderizar página de compatibilidad
-     */
-    public function render_compatibility() {
-        $this->render_dashboard('compatibility');
-    }
-
-    /**
-     * Renderizar página de herramientas
-     */
-    public function render_tools() {
-        $this->render_dashboard('tools');
-    }
-
-    /**
-     * Renderizar página de logs
-     */
-    public function render_logs() {
-        $this->render_dashboard('logs');
-    }
-
-    /**
-     * Redirigir páginas heredadas a la nueva vista tabulada
-     */
-    public function handle_legacy_page_redirects() {
-        if (!is_admin() || !isset($_GET['page'])) {
-            return;
-        }
-
-        $page = sanitize_key(wp_unslash($_GET['page']));
-
-        if ($page === 'suple-speed' || $page === 'suple-speed-settings') {
-            return;
-        }
-
-        $legacy_tabs = [
-            'suple-speed-performance' => 'performance',
-            'suple-speed-cache' => 'cache',
-            'suple-speed-assets' => 'assets',
-            'suple-speed-critical' => 'critical',
-            'suple-speed-fonts' => 'fonts',
-            'suple-speed-images' => 'images',
-            'suple-speed-rules' => 'rules',
-            'suple-speed-compatibility' => 'compatibility',
-            'suple-speed-tools' => 'tools',
-            'suple-speed-logs' => 'logs',
-        ];
-
-        if (!isset($legacy_tabs[$page])) {
-            return;
-        }
-
-        if (!current_user_can('manage_options')) {
-            return;
-        }
-
-        $target = add_query_arg(
-            [
-                'page' => 'suple-speed',
-                'section' => $legacy_tabs[$page],
-            ],
-            admin_url('admin.php')
-        );
-
-        wp_safe_redirect($target);
-        exit;
-    }
-    
     /**
      * Renderizar página de configuración
      */
