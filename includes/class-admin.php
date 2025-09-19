@@ -12,6 +12,7 @@ class Admin {
      */
     private $settings;
     private $logger;
+    private $critical_css_generator;
 
     /**
      * Pasos de onboarding
@@ -28,6 +29,7 @@ class Admin {
         
         if (function_exists('suple_speed')) {
             $this->logger = suple_speed()->logger;
+            $this->critical_css_generator = suple_speed()->critical_css_generator;
         }
         
         $this->init_hooks();
@@ -42,6 +44,7 @@ class Admin {
         add_action('admin_init', [$this, 'handle_legacy_page_redirects'], 1);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_scripts']);
         add_action('admin_notices', [$this, 'show_admin_notices']);
+        add_action('admin_post_suple_speed_generate_critical_css', [$this, 'handle_generate_critical_css']);
 
         // AJAX handlers
         add_action('wp_ajax_suple_speed_save_settings', [$this, 'ajax_save_settings']);
@@ -443,9 +446,36 @@ class Admin {
      * Mostrar avisos de administración
      */
     public function show_admin_notices() {
+        if (isset($_GET['page']) && strpos(sanitize_text_field(wp_unslash($_GET['page'])), 'suple-speed') === 0) {
+            $feedback = get_transient('suple_speed_critical_css_feedback');
+            if ($feedback && is_array($feedback)) {
+                $type = $feedback['type'] ?? 'info';
+                $message = $feedback['message'] ?? '';
+
+                if (!empty($message)) {
+                    $class = 'notice';
+                    switch ($type) {
+                        case 'success':
+                            $class .= ' notice-success';
+                            break;
+                        case 'error':
+                            $class .= ' notice-error';
+                            break;
+                        default:
+                            $class .= ' notice-info';
+                            break;
+                    }
+
+                    printf('<div class="%1$s is-dismissible"><p>%2$s</p></div>', esc_attr($class), wp_kses_post($message));
+                }
+
+                delete_transient('suple_speed_critical_css_feedback');
+            }
+        }
+
         // Aviso si no hay API key de PSI
-        if (empty($this->settings['psi_api_key']) && 
-            isset($_GET['page']) && 
+        if (empty($this->settings['psi_api_key']) &&
+            isset($_GET['page']) &&
             strpos($_GET['page'], 'suple-speed') === 0) {
             
             echo '<div class="notice notice-warning is-dismissible">';
@@ -1178,7 +1208,7 @@ class Admin {
             'php_version' => PHP_VERSION,
             'status' => 'active'
         ];
-        
+
         // Estadísticas de caché
         if (function_exists('suple_speed')) {
             $data['cache_stats'] = suple_speed()->cache->get_cache_stats();
@@ -1186,9 +1216,70 @@ class Admin {
             $data['fonts_stats'] = suple_speed()->fonts->get_fonts_stats();
             $data['images_stats'] = suple_speed()->images->get_optimization_stats();
             $data['compat_report'] = suple_speed()->compat->get_compatibility_report();
+            $data['critical_css_status'] = suple_speed()->critical_css_generator->get_status();
         }
-        
+
         return $data;
+    }
+
+    /**
+     * Gestionar la solicitud de generación de Critical CSS.
+     */
+    public function handle_generate_critical_css() {
+        if (!current_user_can('manage_options')) {
+            wp_die(__('You do not have permission to perform this action.', 'suple-speed'));
+        }
+
+        check_admin_referer('suple_speed_generate_critical_css');
+
+        $url = isset($_POST['critical_css_url']) ? esc_url_raw(trim(wp_unslash($_POST['critical_css_url']))) : '';
+
+        if (empty($url) && $this->critical_css_generator) {
+            $status = $this->critical_css_generator->get_status();
+            if (!empty($status['url'])) {
+                $url = $status['url'];
+            }
+        }
+
+        if (!$this->critical_css_generator) {
+            set_transient('suple_speed_critical_css_feedback', [
+                'type'    => 'error',
+                'message' => __('The Critical CSS generator service is unavailable.', 'suple-speed'),
+            ], MINUTE_IN_SECONDS);
+
+            wp_safe_redirect(add_query_arg([
+                'page'    => 'suple-speed',
+                'section' => 'critical',
+            ], admin_url('admin.php')));
+            exit;
+        }
+
+        if (empty($url)) {
+            set_transient('suple_speed_critical_css_feedback', [
+                'type'    => 'error',
+                'message' => __('Please provide a valid URL to generate Critical CSS.', 'suple-speed'),
+            ], MINUTE_IN_SECONDS);
+        } else {
+            $result = $this->critical_css_generator->queue_generation($url);
+
+            if (is_wp_error($result)) {
+                set_transient('suple_speed_critical_css_feedback', [
+                    'type'    => 'error',
+                    'message' => $result->get_error_message(),
+                ], MINUTE_IN_SECONDS);
+            } else {
+                set_transient('suple_speed_critical_css_feedback', [
+                    'type'    => 'success',
+                    'message' => __('Critical CSS generation has been queued. Refresh this page in a moment to review the result.', 'suple-speed'),
+                ], MINUTE_IN_SECONDS);
+            }
+        }
+
+        wp_safe_redirect(add_query_arg([
+            'page'    => 'suple-speed',
+            'section' => 'critical',
+        ], admin_url('admin.php')));
+        exit;
     }
     
     /**

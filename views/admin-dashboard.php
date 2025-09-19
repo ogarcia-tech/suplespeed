@@ -129,6 +129,45 @@ if ($fonts_module && method_exists($fonts_module, 'get_font_preloads')) {
 $asset_preloads = $current_settings['preload_assets'] ?? [];
 $critical_css   = $current_settings['critical_css_general'] ?? '';
 
+$critical_css_status_defaults = [
+    'status'       => 'idle',
+    'message'      => '',
+    'url'          => '',
+    'created_at'   => 0,
+    'started_at'   => 0,
+    'completed_at' => 0,
+    'duration'     => 0,
+    'css_length'   => 0,
+    'error_code'   => '',
+];
+$critical_css_status = wp_parse_args($dashboard_data['critical_css_status'] ?? [], $critical_css_status_defaults);
+$critical_css_status_label_map = [
+    'idle'       => __('Idle', 'suple-speed'),
+    'pending'    => __('Pending', 'suple-speed'),
+    'processing' => __('Processing', 'suple-speed'),
+    'success'    => __('Completed', 'suple-speed'),
+    'error'      => __('Failed', 'suple-speed'),
+];
+$critical_css_status_label = $critical_css_status_label_map[$critical_css_status['status']] ?? ucfirst($critical_css_status['status']);
+$critical_css_date_format = get_option('date_format') . ' ' . get_option('time_format');
+$critical_css_created_at = $critical_css_status['created_at'] ? date_i18n($critical_css_date_format, (int) $critical_css_status['created_at']) : '';
+$critical_css_started_at = $critical_css_status['started_at'] ? date_i18n($critical_css_date_format, (int) $critical_css_status['started_at']) : '';
+$critical_css_completed_at = $critical_css_status['completed_at'] ? date_i18n($critical_css_date_format, (int) $critical_css_status['completed_at']) : '';
+$critical_css_duration = '';
+if (!empty($critical_css_status['duration'])) {
+    if (!empty($critical_css_status['started_at']) && !empty($critical_css_status['completed_at'])) {
+        $critical_css_duration = human_time_diff((int) $critical_css_status['started_at'], (int) $critical_css_status['completed_at']);
+    }
+
+    if (empty($critical_css_duration)) {
+        $critical_css_duration = sprintf(
+            _n('%s second', '%s seconds', (int) $critical_css_status['duration'], 'suple-speed'),
+            number_format_i18n((int) $critical_css_status['duration'])
+        );
+    }
+}
+
+
 $compat_module = function_exists('suple_speed') ? suple_speed()->compat : null;
 $compat_report_defaults = [
     'detected_plugins'    => [],
@@ -873,6 +912,90 @@ $onboarding_critical_labels = array_map(function($step) {
                     <?php else: ?>
                         <p><?php _e('No asset preloads defined. Configure CSS/JS preloads to improve paint times.', 'suple-speed'); ?></p>
                     <?php endif; ?>
+                </div>
+            </div>
+
+            <div class="suple-card suple-mt-2">
+                <h3><?php _e('Generate Critical CSS on demand', 'suple-speed'); ?></h3>
+                <p><?php _e('Request a fresh critical CSS snippet using your configured API service. The job runs in the background so you can keep working without waiting.', 'suple-speed'); ?></p>
+
+                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="suple-form suple-mt-1">
+                    <?php wp_nonce_field('suple_speed_generate_critical_css'); ?>
+                    <input type="hidden" name="action" value="suple_speed_generate_critical_css">
+
+                    <div class="suple-form-group">
+                        <label for="suple-critical-css-url" class="suple-form-label"><?php _e('Target URL', 'suple-speed'); ?></label>
+                        <input type="url" id="suple-critical-css-url" name="critical_css_url" class="suple-form-input" required
+                               placeholder="https://example.com/"
+                               value="<?php echo esc_attr($critical_css_status['url'] ?: home_url('/')); ?>">
+                    </div>
+
+                    <div class="suple-form-actions">
+                        <button type="submit" class="suple-button">
+                            <span class="dashicons dashicons-update"></span>
+                            <?php _e('Generate Critical CSS', 'suple-speed'); ?>
+                        </button>
+                        <?php if (!empty($critical_css_status['url']) && in_array($critical_css_status['status'], ['error', 'success'], true)): ?>
+                            <button type="submit" name="retry" value="1" class="suple-button suple-button-secondary">
+                                <?php _e('Retry last URL', 'suple-speed'); ?>
+                            </button>
+                        <?php endif; ?>
+                    </div>
+                </form>
+
+                <div class="suple-mt-2">
+                    <h4><?php _e('Latest job summary', 'suple-speed'); ?></h4>
+                    <ul class="suple-list">
+                        <li>
+                            <strong><?php _e('Status', 'suple-speed'); ?>:</strong>
+                            <?php echo esc_html($critical_css_status_label); ?>
+                            <?php if (!empty($critical_css_status['message'])): ?>
+                                — <span><?php echo esc_html($critical_css_status['message']); ?></span>
+                            <?php endif; ?>
+                        </li>
+                        <?php if (!empty($critical_css_status['url'])): ?>
+                            <li>
+                                <strong><?php _e('URL', 'suple-speed'); ?>:</strong>
+                                <code><?php echo esc_html($critical_css_status['url']); ?></code>
+                            </li>
+                        <?php endif; ?>
+                        <?php if (!empty($critical_css_created_at)): ?>
+                            <li>
+                                <strong><?php _e('Queued at', 'suple-speed'); ?>:</strong>
+                                <?php echo esc_html($critical_css_created_at); ?>
+                            </li>
+                        <?php endif; ?>
+                        <?php if (!empty($critical_css_started_at)): ?>
+                            <li>
+                                <strong><?php _e('Started at', 'suple-speed'); ?>:</strong>
+                                <?php echo esc_html($critical_css_started_at); ?>
+                            </li>
+                        <?php endif; ?>
+                        <?php if (!empty($critical_css_completed_at)): ?>
+                            <li>
+                                <strong><?php _e('Completed at', 'suple-speed'); ?>:</strong>
+                                <?php echo esc_html($critical_css_completed_at); ?>
+                            </li>
+                        <?php endif; ?>
+                        <?php if (!empty($critical_css_duration)): ?>
+                            <li>
+                                <strong><?php _e('Generation time', 'suple-speed'); ?>:</strong>
+                                <?php echo esc_html($critical_css_duration); ?>
+                            </li>
+                        <?php endif; ?>
+                        <?php if (!empty($critical_css_status['css_length'])): ?>
+                            <li>
+                                <strong><?php _e('CSS size', 'suple-speed'); ?>:</strong>
+                                <?php echo esc_html(sprintf(__('%s characters', 'suple-speed'), number_format_i18n((int) $critical_css_status['css_length']))); ?>
+                            </li>
+                        <?php endif; ?>
+                        <?php if (!empty($critical_css_status['error_code']) && $critical_css_status['status'] === 'error'): ?>
+                            <li>
+                                <strong><?php _e('Error code', 'suple-speed'); ?>:</strong>
+                                <code><?php echo esc_html($critical_css_status['error_code']); ?></code>
+                            </li>
+                        <?php endif; ?>
+                    </ul>
                 </div>
             </div>
 
