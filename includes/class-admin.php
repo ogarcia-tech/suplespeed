@@ -708,19 +708,7 @@ class Admin {
     /**
      * Renderizar dashboard
      */
-    public function render_dashboard($active_tab = null) {
-        if ($active_tab === null) {
-            $requested = isset($_GET['section']) ? sanitize_key(wp_unslash($_GET['section'])) : '';
-            if (empty($requested) && isset($_GET['tab'])) {
-                $requested = sanitize_key(wp_unslash($_GET['tab']));
-            }
-            $active_tab = $requested ?: 'overview';
-        }
-
-        if (empty($active_tab)) {
-            $active_tab = 'overview';
-        }
-
+    public function render_dashboard() {
         include SUPLE_SPEED_PLUGIN_DIR . 'views/admin-dashboard.php';
     }
 
