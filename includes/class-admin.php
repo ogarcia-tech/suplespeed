@@ -12,7 +12,9 @@ class Admin {
      */
     private $settings;
     private $logger;
+
     private $database;
+
 
     /**
      * Pasos de onboarding
@@ -29,9 +31,11 @@ class Admin {
         
         if (function_exists('suple_speed')) {
             $this->logger = suple_speed()->logger;
+
             if (isset(suple_speed()->database)) {
                 $this->database = suple_speed()->database;
             }
+
         }
         
         $this->init_hooks();
@@ -46,12 +50,19 @@ class Admin {
         add_action('admin_init', [$this, 'handle_legacy_page_redirects'], 1);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_scripts']);
         add_action('admin_notices', [$this, 'show_admin_notices']);
+        add_action('admin_post_suple_speed_generate_critical_css', [$this, 'handle_generate_critical_css']);
 
         // AJAX handlers
         add_action('wp_ajax_suple_speed_save_settings', [$this, 'ajax_save_settings']);
+        add_action('wp_ajax_suple_speed_save_cdn_settings', [$this, 'ajax_save_cdn_settings']);
         add_action('wp_ajax_suple_speed_reset_settings', [$this, 'ajax_reset_settings']);
         add_action('wp_ajax_suple_speed_export_settings', [$this, 'ajax_export_settings']);
         add_action('wp_ajax_suple_speed_import_settings', [$this, 'ajax_import_settings']);
+        add_action('wp_ajax_suple_speed_import_rules', [$this, 'ajax_import_rules']);
+        add_action('wp_ajax_suple_speed_clear_lqip_cache', [$this, 'ajax_clear_lqip_cache']);
+        add_action('wp_ajax_suple_speed_export_logs', [$this, 'ajax_export_logs']);
+        add_action('wp_ajax_suple_speed_clear_logs', [$this, 'ajax_clear_logs']);
+        add_action('wp_ajax_suple_speed_test_cache_warmup', [$this, 'ajax_test_cache_warmup']);
 
         add_action('wp_ajax_suple_speed_update_onboarding', [$this, 'ajax_update_onboarding']);
         add_action('wp_ajax_suple_speed_database_cleanup_revisions', [$this, 'ajax_database_cleanup_revisions']);
@@ -236,7 +247,8 @@ class Admin {
      */
     public function sanitize_settings($input) {
         $sanitized = [];
-        
+        $current_settings = get_option('suple_speed_settings', []);
+
         // Configuraciones booleanas
         $boolean_settings = [
             'cache_enabled', 'compression_enabled', 'assets_enabled',
@@ -294,6 +306,15 @@ class Admin {
         ];
         
         foreach ($array_settings as $setting) {
+            if ($setting === 'preload_assets') {
+                $existing = isset($current_settings[$setting]) && is_array($current_settings[$setting])
+                    ? $current_settings[$setting]
+                    : [];
+
+                $sanitized[$setting] = $this->sanitize_preload_assets($input[$setting] ?? null, $existing);
+                continue;
+            }
+
             $sanitized[$setting] = isset($input[$setting])
                 ? $this->normalize_list_setting($input[$setting])
                 : [];
@@ -312,6 +333,107 @@ class Admin {
             sanitize_textarea_field($input['images_critical_manual']) :
             '';
 
+        if (isset($input['cdn_integrations']) && is_array($input['cdn_integrations'])) {
+            $sanitized['cdn_integrations'] = $this->sanitize_cdn_settings($input['cdn_integrations']);
+        } else {
+            $sanitized['cdn_integrations'] = $current_settings['cdn_integrations'] ?? [];
+        }
+
+        return $sanitized;
+    }
+
+    /**
+     * Sanitizar configuraciones de CDN
+     */
+    private function sanitize_cdn_settings($input) {
+        $defaults = [
+            'cloudflare' => [
+                'enabled' => false,
+                'api_token' => '',
+                'zone_id' => '',
+            ],
+            'bunnycdn' => [
+                'enabled' => false,
+                'api_key' => '',
+                'zone_id' => '',
+            ],
+        ];
+
+        $sanitized = [];
+
+        foreach ($defaults as $provider => $provider_defaults) {
+            $provider_input = $input[$provider] ?? [];
+
+            if (!is_array($provider_input)) {
+                $provider_input = [];
+            }
+
+            $provider_settings = [
+                'enabled' => filter_var($provider_input['enabled'] ?? false, FILTER_VALIDATE_BOOLEAN),
+            ];
+
+            foreach ($provider_defaults as $field => $default_value) {
+                if ($field === 'enabled') {
+                    continue;
+                }
+
+                $value = $provider_input[$field] ?? '';
+                $provider_settings[$field] = $value === ''
+                    ? ''
+                    : sanitize_text_field($value);
+            }
+
+            $sanitized[$provider] = wp_parse_args($provider_settings, $provider_defaults);
+        }
+
+        return $sanitized;
+    }
+
+    /**
+     * Sanitizar configuración de precarga de assets
+     */
+    private function sanitize_preload_assets($value, $existing = []) {
+        if ($value === null) {
+            return is_array($existing) ? $existing : [];
+        }
+
+        if (!is_array($value)) {
+            return is_array($existing) ? $existing : [];
+        }
+
+        $sanitized = [];
+
+        foreach ($value as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+
+            $url = esc_url_raw($entry['url'] ?? '');
+
+            if (empty($url)) {
+                continue;
+            }
+
+            $item = ['url' => $url];
+
+            if (!empty($entry['as'])) {
+                $item['as'] = sanitize_text_field($entry['as']);
+            }
+
+            if (!empty($entry['type'])) {
+                $item['type'] = sanitize_text_field($entry['type']);
+            }
+
+            if (!empty($entry['crossorigin'])) {
+                $item['crossorigin'] = sanitize_text_field($entry['crossorigin']);
+            }
+
+            if (!empty($entry['media'])) {
+                $item['media'] = sanitize_text_field($entry['media']);
+            }
+
+            $sanitized[] = $item;
+        }
 
         return $sanitized;
     }
@@ -378,6 +500,7 @@ class Admin {
         $asset_groups = [];
         $manual_overrides = [];
         $bundle_status = ['css' => [], 'js' => []];
+        $preload_recommendations = [];
 
         if (function_exists('suple_speed') && isset(suple_speed()->assets)) {
             $assets_module = suple_speed()->assets;
@@ -393,15 +516,21 @@ class Admin {
             if (method_exists($assets_module, 'get_bundle_status')) {
                 $bundle_status = $assets_module->get_bundle_status();
             }
+
+            if (method_exists($assets_module, 'get_preload_recommendations')) {
+                $preload_recommendations = $assets_module->get_preload_recommendations();
+            }
         }
 
         // Datos para JavaScript
         wp_localize_script('suple-speed-admin', 'supleSpeedAdmin', [
             'nonce' => wp_create_nonce('suple_speed_nonce'),
             'ajaxUrl' => admin_url('admin-ajax.php'),
+            'homeUrl' => home_url('/'),
             'assetGroups' => $asset_groups,
             'manualAssetGroups' => $manual_overrides,
             'bundleStatus' => $bundle_status,
+            'preloadRecommendations' => $preload_recommendations,
             'labels' => [
                 'handle' => __('Handle', 'suple-speed'),
                 'type' => __('Type', 'suple-speed'),
@@ -425,7 +554,12 @@ class Admin {
                 'bundlesHandles' => __('Handles', 'suple-speed'),
                 'bundlesSize' => __('Size', 'suple-speed'),
                 'groupPrefix' => __('Group', 'suple-speed'),
-                'scanPlaceholder' => __('Run a scan to populate the detected handles list and review their current classification.', 'suple-speed')
+                'scanPlaceholder' => __('Run a scan to populate the detected handles list and review their current classification.', 'suple-speed'),
+                'resource' => __('Resource', 'suple-speed'),
+                'size' => __('Size', 'suple-speed'),
+                'seenOn' => __('Seen on', 'suple-speed'),
+                'position' => __('Position', 'suple-speed'),
+                'actions' => __('Actions', 'suple-speed')
             ],
             'strings' => [
                 'confirmReset' => __('Are you sure you want to reset all settings?', 'suple-speed'),
@@ -436,13 +570,16 @@ class Admin {
                 'processing' => __('Processing...', 'suple-speed'),
                 'scanningHandles' => __('Scanning handles…', 'suple-speed'),
                 'scanHandlesError' => __('We could not retrieve the handles for this page.', 'suple-speed'),
+                'confirmClearLogs' => __('Are you sure you want to clear the stored logs?', 'suple-speed'),
                 'success' => __('Operation completed successfully', 'suple-speed'),
                 'error' => __('An error occurred', 'suple-speed'),
+
                 'databaseNoTables' => __('No table information available.', 'suple-speed'),
                 'tablesNeedingOptimization' => __('Tables needing optimization: %1$s of %2$s', 'suple-speed'),
                 'tableNeedsAttention' => __('Needs attention', 'suple-speed'),
                 'agoFormat' => __('%s ago', 'suple-speed'),
                 'never' => __('Never', 'suple-speed')
+
             ]
         ]);
     }
@@ -451,9 +588,36 @@ class Admin {
      * Mostrar avisos de administración
      */
     public function show_admin_notices() {
+        if (isset($_GET['page']) && strpos(sanitize_text_field(wp_unslash($_GET['page'])), 'suple-speed') === 0) {
+            $feedback = get_transient('suple_speed_critical_css_feedback');
+            if ($feedback && is_array($feedback)) {
+                $type = $feedback['type'] ?? 'info';
+                $message = $feedback['message'] ?? '';
+
+                if (!empty($message)) {
+                    $class = 'notice';
+                    switch ($type) {
+                        case 'success':
+                            $class .= ' notice-success';
+                            break;
+                        case 'error':
+                            $class .= ' notice-error';
+                            break;
+                        default:
+                            $class .= ' notice-info';
+                            break;
+                    }
+
+                    printf('<div class="%1$s is-dismissible"><p>%2$s</p></div>', esc_attr($class), wp_kses_post($message));
+                }
+
+                delete_transient('suple_speed_critical_css_feedback');
+            }
+        }
+
         // Aviso si no hay API key de PSI
-        if (empty($this->settings['psi_api_key']) && 
-            isset($_GET['page']) && 
+        if (empty($this->settings['psi_api_key']) &&
+            isset($_GET['page']) &&
             strpos($_GET['page'], 'suple-speed') === 0) {
             
             echo '<div class="notice notice-warning is-dismissible">';
@@ -702,7 +866,8 @@ class Admin {
         // Sanitizar y guardar
         $sanitized_settings = $this->sanitize_settings($settings);
         update_option('suple_speed_settings', $sanitized_settings);
-        
+        $this->settings = get_option('suple_speed_settings', []);
+
         // Log del cambio
         if ($this->logger) {
             $this->logger->info('Settings updated via AJAX', [
@@ -732,7 +897,9 @@ class Admin {
         if (function_exists('suple_speed')) {
             suple_speed()->reset_default_options();
         }
-        
+
+        $this->settings = get_option('suple_speed_settings', []);
+
         wp_send_json_success([
             'message' => __('Settings reset to defaults', 'suple-speed')
         ]);
@@ -799,6 +966,7 @@ class Admin {
         // Importar configuraciones
         $sanitized_settings = $this->sanitize_settings($import_data['settings']);
         update_option('suple_speed_settings', $sanitized_settings);
+        $this->settings = get_option('suple_speed_settings', []);
         
         // Importar reglas si existen
         if (isset($import_data['rules']) && is_array($import_data['rules'])) {
@@ -813,6 +981,45 @@ class Admin {
 
     /**
 
+     * AJAX: Guardar credenciales CDN
+     */
+    public function ajax_save_cdn_settings() {
+        check_ajax_referer('suple_speed_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_die('Unauthorized');
+        }
+
+        $cdn_settings = isset($_POST['cdn']) ? wp_unslash($_POST['cdn']) : [];
+        if (!is_array($cdn_settings)) {
+            $cdn_settings = [];
+        }
+
+        $sanitized_cdn = $this->sanitize_cdn_settings($cdn_settings);
+        $current_settings = get_option('suple_speed_settings', []);
+        $current_settings['cdn_integrations'] = $sanitized_cdn;
+
+        update_option('suple_speed_settings', $current_settings);
+        $this->settings = $current_settings;
+
+        if ($this->logger) {
+            $enabled_providers = array_keys(array_filter($sanitized_cdn, function($config) {
+                return !empty($config['enabled']);
+            }));
+
+            $this->logger->info('CDN settings updated', [
+                'enabled_providers' => $enabled_providers,
+            ], 'cdn');
+        }
+
+        wp_send_json_success([
+            'message' => __('CDN credentials saved successfully', 'suple-speed'),
+
+        ]);
+    }
+
+    /**
+
      * AJAX: Guardar progreso del onboarding
      */
     public function ajax_update_onboarding() {
@@ -822,15 +1029,17 @@ class Admin {
             wp_send_json_error(__('Unauthorized', 'suple-speed'));
         }
 
-        $step_key = sanitize_key($_POST['step'] ?? '');
+        $step_key = isset($_POST['step']) ? sanitize_key($_POST['step']) : '';
         $completed = isset($_POST['completed'])
             ? filter_var($_POST['completed'], FILTER_VALIDATE_BOOLEAN)
             : false;
+        $dismissed = array_key_exists('dismissed', $_POST)
+            ? filter_var($_POST['dismissed'], FILTER_VALIDATE_BOOLEAN)
+            : null;
 
         $steps = $this->get_onboarding_steps();
-
-        if (empty($step_key) || !isset($steps[$step_key])) {
-            wp_send_json_error(__('Invalid onboarding step', 'suple-speed'));
+        if (!is_array($steps)) {
+            $steps = [];
         }
 
         $state = get_option('suple_speed_onboarding', []);
@@ -838,10 +1047,34 @@ class Admin {
             $state = [];
         }
 
-        if ($completed) {
-            $state[$step_key] = true;
-        } else {
-            unset($state[$step_key]);
+        $state_changed = false;
+
+        if ($step_key !== '') {
+            if (!isset($steps[$step_key])) {
+                wp_send_json_error(__('Invalid onboarding step', 'suple-speed'));
+            }
+
+            if ($completed) {
+                $state[$step_key] = true;
+            } else {
+                unset($state[$step_key]);
+            }
+
+            $state_changed = true;
+        }
+
+        if ($dismissed !== null) {
+            if ($dismissed) {
+                $state['dismissed'] = true;
+            } else {
+                unset($state['dismissed']);
+            }
+
+            $state_changed = true;
+        }
+
+        if (!$state_changed) {
+            wp_send_json_error(__('Invalid onboarding request', 'suple-speed'));
         }
 
         update_option('suple_speed_onboarding', $state);
@@ -871,6 +1104,7 @@ class Admin {
             'progress' => $progress,
             'remaining_critical' => array_keys($remaining_critical),
             'remaining_labels' => array_values($remaining_labels),
+            'dismissed' => !empty($state['dismissed']),
 
         ]);
     }
@@ -1001,7 +1235,7 @@ class Admin {
             'php_version' => PHP_VERSION,
             'status' => 'active'
         ];
-        
+
         // Estadísticas de caché
         if (function_exists('suple_speed')) {
             $data['cache_stats'] = suple_speed()->cache->get_cache_stats();
@@ -1009,12 +1243,74 @@ class Admin {
             $data['fonts_stats'] = suple_speed()->fonts->get_fonts_stats();
             $data['images_stats'] = suple_speed()->images->get_optimization_stats();
             $data['compat_report'] = suple_speed()->compat->get_compatibility_report();
+
             if ($this->database && method_exists($this->database, 'get_stats')) {
                 $data['database_stats'] = $this->database->get_stats();
             }
+
         }
 
         return $data;
+    }
+
+    /**
+     * Gestionar la solicitud de generación de Critical CSS.
+     */
+    public function handle_generate_critical_css() {
+        if (!current_user_can('manage_options')) {
+            wp_die(__('You do not have permission to perform this action.', 'suple-speed'));
+        }
+
+        check_admin_referer('suple_speed_generate_critical_css');
+
+        $url = isset($_POST['critical_css_url']) ? esc_url_raw(trim(wp_unslash($_POST['critical_css_url']))) : '';
+
+        if (empty($url) && $this->critical_css_generator) {
+            $status = $this->critical_css_generator->get_status();
+            if (!empty($status['url'])) {
+                $url = $status['url'];
+            }
+        }
+
+        if (!$this->critical_css_generator) {
+            set_transient('suple_speed_critical_css_feedback', [
+                'type'    => 'error',
+                'message' => __('The Critical CSS generator service is unavailable.', 'suple-speed'),
+            ], MINUTE_IN_SECONDS);
+
+            wp_safe_redirect(add_query_arg([
+                'page'    => 'suple-speed',
+                'section' => 'critical',
+            ], admin_url('admin.php')));
+            exit;
+        }
+
+        if (empty($url)) {
+            set_transient('suple_speed_critical_css_feedback', [
+                'type'    => 'error',
+                'message' => __('Please provide a valid URL to generate Critical CSS.', 'suple-speed'),
+            ], MINUTE_IN_SECONDS);
+        } else {
+            $result = $this->critical_css_generator->queue_generation($url);
+
+            if (is_wp_error($result)) {
+                set_transient('suple_speed_critical_css_feedback', [
+                    'type'    => 'error',
+                    'message' => $result->get_error_message(),
+                ], MINUTE_IN_SECONDS);
+            } else {
+                set_transient('suple_speed_critical_css_feedback', [
+                    'type'    => 'success',
+                    'message' => __('Critical CSS generation has been queued. Refresh this page in a moment to review the result.', 'suple-speed'),
+                ], MINUTE_IN_SECONDS);
+            }
+        }
+
+        wp_safe_redirect(add_query_arg([
+            'page'    => 'suple-speed',
+            'section' => 'critical',
+        ], admin_url('admin.php')));
+        exit;
     }
     
     /**

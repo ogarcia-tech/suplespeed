@@ -35,7 +35,9 @@ class Assets {
     private $style_filter_registered = false;
     private $manual_groups = [];
     private $manual_groups_raw = [];
-    
+    private $preload_recommendations = [];
+    private $preload_rejections = [];
+
     public function __construct() {
         $this->settings = get_option('suple_speed_settings', []);
         $this->assets_dir = SUPLE_SPEED_CACHE_DIR . 'assets/';
@@ -48,6 +50,8 @@ class Assets {
         $this->async_css_groups = array_map('strtoupper', $this->settings['assets_async_css_groups'] ?? []);
 
         $this->load_manual_groups();
+        $this->load_preload_recommendations();
+        $this->load_preload_rejections();
 
         $this->init_hooks();
         $this->load_excluded_handles();
@@ -68,8 +72,15 @@ class Assets {
             add_filter('script_loader_src', [$this, 'modify_js_src'], 10, 2);
         }
 
+        add_action('init', [$this, 'maybe_schedule_preload_collector']);
+        add_action('suple_speed_collect_preload_recommendations', [$this, 'generate_preload_recommendations']);
+
         // AJAX para escanear handles
         add_action('wp_ajax_suple_speed_scan_handles', [$this, 'ajax_scan_handles']);
+        add_action('wp_ajax_suple_speed_get_preload_recommendations', [$this, 'ajax_get_preload_recommendations']);
+        add_action('wp_ajax_suple_speed_generate_preload_recommendations', [$this, 'ajax_generate_preload_recommendations']);
+        add_action('wp_ajax_suple_speed_accept_preload_recommendation', [$this, 'ajax_accept_preload_recommendation']);
+        add_action('wp_ajax_suple_speed_reject_preload_recommendation', [$this, 'ajax_reject_preload_recommendation']);
         add_action('template_redirect', [$this, 'maybe_output_handles_capture'], 0);
     }
     
@@ -108,18 +119,673 @@ class Assets {
 
         $this->set_manual_groups($stored);
     }
+
+    /**
+     * Cargar recomendaciones de precarga detectadas
+     */
+    private function load_preload_recommendations() {
+        $stored = get_option('suple_speed_preload_recommendations', []);
+
+        if (!is_array($stored)) {
+            $stored = [];
+        }
+
+        if (!empty($stored) && array_values($stored) === $stored) {
+            $normalized = [];
+
+            foreach ($stored as $entry) {
+                if (is_array($entry) && !empty($entry['id'])) {
+                    $normalized[$entry['id']] = $entry;
+                }
+            }
+
+            $stored = $normalized;
+        }
+
+        $this->preload_recommendations = $stored;
+    }
+
+    /**
+     * Cargar rechazos de precarga previos
+     */
+    private function load_preload_rejections() {
+        $stored = get_option('suple_speed_preload_rejections', []);
+
+        if (!is_array($stored)) {
+            $stored = [];
+        }
+
+        $this->preload_rejections = $stored;
+    }
     
     /**
      * Obtener handles excluidos por compatibilidad
      */
     private function get_compatibility_excluded_handles() {
         $excluded = [];
-        
+
         if (function_exists('suple_speed') && suple_speed()->compat) {
             $excluded = suple_speed()->compat->get_excluded_handles();
         }
-        
+
         return $excluded;
+    }
+
+    /**
+     * Actualizar caché interna de configuración
+     */
+    private function refresh_settings() {
+        $this->settings = get_option('suple_speed_settings', []);
+
+        return $this->settings;
+    }
+
+    /**
+     * Guardar recomendaciones de precarga
+     */
+    private function save_preload_recommendations() {
+        update_option('suple_speed_preload_recommendations', $this->preload_recommendations, false);
+    }
+
+    /**
+     * Guardar rechazos de precarga
+     */
+    private function save_preload_rejections() {
+        update_option('suple_speed_preload_rejections', $this->preload_rejections, false);
+    }
+
+    /**
+     * Obtener recomendaciones actuales
+     */
+    public function get_preload_recommendations($assoc = false) {
+        $recommendations = $this->preload_recommendations;
+
+        if (!$assoc) {
+            return $this->prepare_preload_recommendations_for_output($recommendations);
+        }
+
+        return $recommendations;
+    }
+
+    /**
+     * Programar el recolector de precargas
+     */
+    public function maybe_schedule_preload_collector() {
+        if (!apply_filters('suple_speed_enable_preload_collector', true)) {
+            return;
+        }
+
+        if (!wp_next_scheduled('suple_speed_collect_preload_recommendations')) {
+            wp_schedule_event(time() + HOUR_IN_SECONDS, 'daily', 'suple_speed_collect_preload_recommendations');
+        }
+    }
+
+    /**
+     * Generar recomendaciones de precarga analizando URLs candidatas
+     */
+    public function generate_preload_recommendations($force = false) {
+        $this->refresh_settings();
+
+        $urls = $this->get_candidate_urls_for_preloads();
+
+        if (empty($urls)) {
+            return $this->prepare_preload_recommendations_for_output($this->preload_recommendations);
+        }
+
+        $recommendations = $this->preload_recommendations;
+        $seen_ids = [];
+
+        foreach ($urls as $url) {
+            $assets = $this->analyze_url_for_preloads($url);
+
+            foreach ($assets as $asset) {
+                $id = $asset['id'];
+
+                if (isset($this->preload_rejections[$id])) {
+                    continue;
+                }
+
+                if ($this->is_asset_already_preloaded($asset['url'], $asset['as'])) {
+                    continue;
+                }
+
+                if (isset($recommendations[$id])) {
+                    $existing = $recommendations[$id];
+                    $existing_pages = $existing['pages'] ?? [];
+                    $new_pages = $asset['pages'] ?? [];
+                    $combined_pages = array_values(array_unique(array_merge($existing_pages, $new_pages)));
+                    $asset['pages'] = $combined_pages;
+
+                    if (isset($existing['size']) && !isset($asset['size'])) {
+                        $asset['size'] = $existing['size'];
+                    }
+
+                    if (isset($existing['position']) && isset($asset['position'])) {
+                        $asset['position'] = min($existing['position'], $asset['position']);
+                    }
+
+                    if (!isset($asset['collected_at']) && isset($existing['collected_at'])) {
+                        $asset['collected_at'] = $existing['collected_at'];
+                    }
+                }
+
+                $asset['last_seen'] = time();
+                $recommendations[$id] = $asset;
+                $seen_ids[$id] = true;
+            }
+        }
+
+        foreach ($recommendations as $id => $entry) {
+            if (isset($this->preload_rejections[$id])) {
+                unset($recommendations[$id]);
+                continue;
+            }
+
+            if ($this->is_asset_already_preloaded($entry['url'] ?? '', $entry['as'] ?? '')) {
+                unset($recommendations[$id]);
+                continue;
+            }
+
+            if (!isset($seen_ids[$id])) {
+                $last_seen = $entry['last_seen'] ?? $entry['collected_at'] ?? 0;
+
+                if ($last_seen && (time() - $last_seen) > WEEK_IN_SECONDS) {
+                    unset($recommendations[$id]);
+                }
+            }
+        }
+
+        if (!empty($recommendations)) {
+            uasort($recommendations, function ($a, $b) {
+                $posA = $a['position'] ?? PHP_INT_MAX;
+                $posB = $b['position'] ?? PHP_INT_MAX;
+
+                if ($posA === $posB) {
+                    $sizeA = isset($a['size']) ? (int) $a['size'] : PHP_INT_MAX;
+                    $sizeB = isset($b['size']) ? (int) $b['size'] : PHP_INT_MAX;
+
+                    return $sizeA <=> $sizeB;
+                }
+
+                return $posA <=> $posB;
+            });
+
+            if (count($recommendations) > 20) {
+                $recommendations = array_slice($recommendations, 0, 20, true);
+            }
+        }
+
+        $this->preload_recommendations = $recommendations;
+        $this->save_preload_recommendations();
+
+        if ($this->logger) {
+            $this->logger->info('Preload recommendations updated', [
+                'total' => count($recommendations),
+                'urls' => $urls,
+            ], 'assets');
+        }
+
+        return $this->prepare_preload_recommendations_for_output($recommendations);
+    }
+
+    /**
+     * Obtener URLs candidatas para analizar
+     */
+    private function get_candidate_urls_for_preloads() {
+        $urls = [home_url('/')];
+
+        $recent_posts = wp_get_recent_posts([
+            'numberposts' => 8,
+            'post_status' => 'publish',
+            'post_type' => apply_filters('suple_speed_preload_collector_post_types', ['page', 'post'])
+        ]);
+
+        foreach ($recent_posts as $post) {
+            if (empty($post['ID'])) {
+                continue;
+            }
+
+            $permalink = get_permalink((int) $post['ID']);
+
+            if ($permalink) {
+                $urls[] = $permalink;
+            }
+        }
+
+        $analytics = get_option('suple_speed_analytics_top_pages', []);
+
+        if (is_array($analytics)) {
+            foreach ($analytics as $entry) {
+                if (is_string($entry)) {
+                    $urls[] = $entry;
+                } elseif (is_array($entry) && !empty($entry['url'])) {
+                    $urls[] = $entry['url'];
+                }
+            }
+        }
+
+        $urls = array_values(array_unique(array_filter(array_map('esc_url_raw', $urls))));
+
+        return array_slice($urls, 0, 12);
+    }
+
+    /**
+     * Analizar una URL en busca de assets críticos
+     */
+    private function analyze_url_for_preloads($url) {
+        $url = esc_url_raw($url);
+
+        if (empty($url)) {
+            return [];
+        }
+
+        $request_args = apply_filters('suple_speed_preload_collector_request_args', [
+            'timeout' => 15,
+            'redirection' => 3,
+            'user-agent' => 'SupleSpeed/PreloadCollector',
+            'headers' => [
+                'Accept' => 'text/html,application/xhtml+xml'
+            ]
+        ], $url);
+
+        $response = wp_remote_get($url, $request_args);
+
+        if (is_wp_error($response)) {
+            if ($this->logger) {
+                $this->logger->warning('Preload collector could not fetch URL', [
+                    'url' => $url,
+                    'error' => $response->get_error_message(),
+                ], 'assets');
+            }
+
+            return [];
+        }
+
+        $code = wp_remote_retrieve_response_code($response);
+
+        if ($code < 200 || $code >= 400) {
+            if ($this->logger) {
+                $this->logger->notice('Preload collector skipped URL due to HTTP status', [
+                    'url' => $url,
+                    'status' => $code,
+                ], 'assets');
+            }
+
+            return [];
+        }
+
+        $html = wp_remote_retrieve_body($response);
+
+        if (empty($html)) {
+            return [];
+        }
+
+        return $this->extract_assets_from_html($html, $url);
+    }
+
+    /**
+     * Extraer assets críticos del HTML
+     */
+    private function extract_assets_from_html($html, $page_url) {
+        $recommendations = [];
+
+        if (trim($html) === '') {
+            return $recommendations;
+        }
+
+        $dom = new \DOMDocument();
+        libxml_use_internal_errors(true);
+        $loaded = @$dom->loadHTML('<?xml encoding="utf-8"?>' . $html);
+        libxml_clear_errors();
+
+        if (!$loaded) {
+            return $recommendations;
+        }
+
+        $heads = $dom->getElementsByTagName('head');
+
+        if ($heads->length === 0) {
+            return $recommendations;
+        }
+
+        $head = $heads->item(0);
+        $position = 0;
+
+        foreach ($head->childNodes as $node) {
+            if ($node->nodeType !== XML_ELEMENT_NODE) {
+                continue;
+            }
+
+            $position++;
+            $tag = strtolower($node->nodeName);
+
+            if ($tag === 'link') {
+                $rel_attr = strtolower($node->getAttribute('rel'));
+                $rel_tokens = preg_split('/\s+/', $rel_attr);
+                $href = $this->ensure_absolute_url($node->getAttribute('href'), $page_url);
+
+                if (!$href) {
+                    continue;
+                }
+
+                if (in_array('preload', $rel_tokens, true) && strtolower($node->getAttribute('as')) === 'font') {
+                    continue;
+                }
+
+                if (in_array('stylesheet', $rel_tokens, true)) {
+                    $media = strtolower($node->getAttribute('media'));
+
+                    if (!empty($media) && $media !== 'all') {
+                        continue;
+                    }
+
+                    $size = $this->maybe_fetch_asset_size($href);
+
+                    if ($size !== null && $size > 180000) {
+                        continue;
+                    }
+
+                    $recommendation = $this->create_preload_recommendation('style', $href, $page_url, $position, [
+                        'media' => $node->getAttribute('media')
+                    ], $size);
+
+                    if ($recommendation) {
+                        $recommendations[$recommendation['id']] = $recommendation;
+                    }
+
+                    $font_recommendations = $this->collect_google_font_preloads($href, $page_url, $position);
+
+                    foreach ($font_recommendations as $font_rec) {
+                        $recommendations[$font_rec['id']] = $font_rec;
+                    }
+                }
+            }
+
+            if ($tag === 'script') {
+                $src = $this->ensure_absolute_url($node->getAttribute('src'), $page_url);
+
+                if (!$src) {
+                    continue;
+                }
+
+                if ($node->hasAttribute('async') || $node->hasAttribute('defer')) {
+                    continue;
+                }
+
+                $type_attr = strtolower($node->getAttribute('type'));
+
+                if (!empty($type_attr) && !in_array($type_attr, ['text/javascript', 'application/javascript', 'module'], true)) {
+                    continue;
+                }
+
+                $size = $this->maybe_fetch_asset_size($src);
+
+                if ($size !== null && $size > 200000) {
+                    continue;
+                }
+
+                $recommendation = $this->create_preload_recommendation('script', $src, $page_url, $position, [
+                    'module' => ($type_attr === 'module')
+                ], $size);
+
+                if ($recommendation) {
+                    $recommendations[$recommendation['id']] = $recommendation;
+                }
+            }
+        }
+
+        return array_values($recommendations);
+    }
+
+    /**
+     * Crear estructura de recomendación
+     */
+    private function create_preload_recommendation($type, $asset_url, $page_url, $position, array $extra = [], $size = null) {
+        $asset_url = esc_url_raw($asset_url);
+
+        if (empty($asset_url)) {
+            return null;
+        }
+
+        $id = md5(strtolower($type . '|' . $asset_url));
+
+        $recommendation = [
+            'id' => $id,
+            'url' => $asset_url,
+            'as' => $type === 'style' ? 'style' : ($type === 'font' ? 'font' : 'script'),
+            'type' => $type,
+            'pages' => [esc_url_raw($page_url)],
+            'collected_at' => time(),
+            'last_seen' => time(),
+            'position' => $position,
+        ];
+
+        if ($size !== null) {
+            $recommendation['size'] = (int) $size;
+        }
+
+        if (!empty($extra['media'])) {
+            $recommendation['media'] = sanitize_text_field($extra['media']);
+        }
+
+        if (!empty($extra['crossorigin'])) {
+            $recommendation['crossorigin'] = sanitize_text_field($extra['crossorigin']);
+        }
+
+        if (!empty($extra['module'])) {
+            $recommendation['module'] = (bool) $extra['module'];
+        }
+
+        return $recommendation;
+    }
+
+    /**
+     * Resolver URLs relativas
+     */
+    private function ensure_absolute_url($asset_url, $base_url) {
+        $asset_url = trim((string) $asset_url);
+
+        if ($asset_url === '') {
+            return '';
+        }
+
+        if (strpos($asset_url, '//') === 0) {
+            return (is_ssl() ? 'https:' : 'http:') . $asset_url;
+        }
+
+        if (preg_match('#^https?://#i', $asset_url)) {
+            return $asset_url;
+        }
+
+        if ($asset_url[0] === '/') {
+            return home_url($asset_url);
+        }
+
+        $parts = wp_parse_url($base_url);
+
+        if (!$parts || empty($parts['scheme']) || empty($parts['host'])) {
+            return home_url('/' . ltrim($asset_url, '/'));
+        }
+
+        $path = isset($parts['path']) ? $parts['path'] : '/';
+
+        if (substr($path, -1) !== '/') {
+            $path = trailingslashit(dirname($path));
+        }
+
+        if ($path === './') {
+            $path = '/';
+        }
+
+        $port = isset($parts['port']) ? ':' . $parts['port'] : '';
+
+        return $parts['scheme'] . '://' . $parts['host'] . $port . $path . ltrim($asset_url, '/');
+    }
+
+    /**
+     * Intentar obtener el tamaño de un asset
+     */
+    private function maybe_fetch_asset_size($asset_url) {
+        $asset_url = esc_url_raw($asset_url);
+
+        if (empty($asset_url)) {
+            return null;
+        }
+
+        $home_host = wp_parse_url(home_url(), PHP_URL_HOST);
+        $asset_host = wp_parse_url($asset_url, PHP_URL_HOST);
+
+        if ($asset_host && $home_host && strcasecmp($asset_host, $home_host) !== 0) {
+            return null;
+        }
+
+        $response = wp_remote_head($asset_url, [
+            'timeout' => 10,
+            'redirection' => 3,
+        ]);
+
+        if (is_wp_error($response)) {
+            return null;
+        }
+
+        $code = wp_remote_retrieve_response_code($response);
+
+        if ($code < 200 || $code >= 400) {
+            return null;
+        }
+
+        $length = wp_remote_retrieve_header($response, 'content-length');
+
+        if ($length !== false) {
+            return (int) $length;
+        }
+
+        return null;
+    }
+
+    /**
+     * Detectar fuentes en hojas de Google Fonts
+     */
+    private function collect_google_font_preloads($stylesheet_url, $page_url, $position) {
+        $host = wp_parse_url($stylesheet_url, PHP_URL_HOST);
+
+        if (!$host || stripos($host, 'fonts.googleapis') === false) {
+            return [];
+        }
+
+        $response = wp_remote_get($stylesheet_url, [
+            'timeout' => 10,
+            'redirection' => 3,
+        ]);
+
+        if (is_wp_error($response)) {
+            return [];
+        }
+
+        $code = wp_remote_retrieve_response_code($response);
+
+        if ($code < 200 || $code >= 400) {
+            return [];
+        }
+
+        $body = wp_remote_retrieve_body($response);
+
+        if (empty($body)) {
+            return [];
+        }
+
+        $recommendations = [];
+
+        if (preg_match_all('#url\(([^)]+\.woff2[^)]*)\)#i', $body, $matches)) {
+            foreach ($matches[1] as $font_url_raw) {
+                $font_url = trim($font_url_raw, "\"' ");
+                $font_url = $this->ensure_absolute_url($font_url, $stylesheet_url);
+
+                $recommendation = $this->create_preload_recommendation('font', $font_url, $page_url, $position, [
+                    'crossorigin' => 'anonymous'
+                ]);
+
+                if ($recommendation) {
+                    $recommendations[$recommendation['id']] = $recommendation;
+                }
+            }
+        }
+
+        return array_values($recommendations);
+    }
+
+    /**
+     * Verificar si un asset ya está configurado para precarga
+     */
+    private function is_asset_already_preloaded($asset_url, $as) {
+        if (empty($asset_url)) {
+            return false;
+        }
+
+        $configured = $this->settings['preload_assets'] ?? [];
+
+        if (!is_array($configured)) {
+            return false;
+        }
+
+        foreach ($configured as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+
+            $entry_url = $entry['url'] ?? '';
+            $entry_as = $entry['as'] ?? '';
+
+            if (!$entry_url) {
+                continue;
+            }
+
+            if (strcasecmp($entry_url, $asset_url) === 0 && (!$entry_as || $entry_as === $as)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Preparar recomendaciones para salida pública
+     */
+    private function prepare_preload_recommendations_for_output($recommendations) {
+        if (!is_array($recommendations) || empty($recommendations)) {
+            return [];
+        }
+
+        $output = [];
+
+        foreach ($recommendations as $id => $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+
+            $pages = [];
+
+            foreach ($entry['pages'] ?? [] as $page) {
+                $pages[] = esc_url_raw($page);
+            }
+
+            $output[] = [
+                'id' => $entry['id'] ?? $id,
+                'url' => esc_url_raw($entry['url'] ?? ''),
+                'as' => $entry['as'] ?? '',
+                'type' => $entry['type'] ?? '',
+                'crossorigin' => $entry['crossorigin'] ?? '',
+                'media' => $entry['media'] ?? '',
+                'module' => !empty($entry['module']),
+                'size' => isset($entry['size']) ? (int) $entry['size'] : null,
+                'pages' => $pages,
+                'collected_at' => isset($entry['collected_at']) ? (int) $entry['collected_at'] : null,
+                'last_seen' => isset($entry['last_seen']) ? (int) $entry['last_seen'] : null,
+                'position' => isset($entry['position']) ? (int) $entry['position'] : null,
+            ];
+        }
+
+        return $output;
     }
     
     /**
@@ -1346,13 +2012,172 @@ class Assets {
     }
     
     // === AJAX ===
-    
+
+    /**
+     * AJAX: Escanear handles activos
+     */
+    public function ajax_get_preload_recommendations() {
+        check_ajax_referer('suple_speed_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_die('Unauthorized');
+        }
+
+        wp_send_json_success([
+            'recommendations' => $this->prepare_preload_recommendations_for_output($this->preload_recommendations)
+        ]);
+    }
+
+    /**
+     * AJAX: Generar recomendaciones de precarga
+     */
+    public function ajax_generate_preload_recommendations() {
+        check_ajax_referer('suple_speed_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_die('Unauthorized');
+        }
+
+        $recommendations = $this->generate_preload_recommendations(true);
+
+        wp_send_json_success([
+            'message' => __('Popular pages analyzed. Review the preload suggestions below.', 'suple-speed'),
+            'recommendations' => $recommendations
+        ]);
+    }
+
+    /**
+     * AJAX: Aceptar una recomendación de precarga
+     */
+    public function ajax_accept_preload_recommendation() {
+        check_ajax_referer('suple_speed_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_die('Unauthorized');
+        }
+
+        $id = isset($_POST['id']) ? sanitize_text_field(wp_unslash($_POST['id'])) : '';
+
+        if (!$id || !isset($this->preload_recommendations[$id])) {
+            wp_send_json_error(__('The requested recommendation no longer exists.', 'suple-speed'));
+        }
+
+        $recommendation = $this->preload_recommendations[$id];
+
+        $settings = get_option('suple_speed_settings', []);
+
+        if (!is_array($settings)) {
+            $settings = [];
+        }
+
+        $preload_assets = $settings['preload_assets'] ?? [];
+
+        if (!is_array($preload_assets)) {
+            $preload_assets = [];
+        }
+
+        $already_configured = false;
+
+        foreach ($preload_assets as $asset) {
+            if (!is_array($asset)) {
+                continue;
+            }
+
+            $asset_url = $asset['url'] ?? '';
+            $asset_as = $asset['as'] ?? '';
+
+            if ($asset_url && strcasecmp($asset_url, $recommendation['url']) === 0 && (!$asset_as || $asset_as === $recommendation['as'])) {
+                $already_configured = true;
+                break;
+            }
+        }
+
+        if (!$already_configured) {
+            $new_entry = [
+                'url' => $recommendation['url'],
+                'as' => $recommendation['as'],
+            ];
+
+            if (!empty($recommendation['type']) && $recommendation['type'] !== $recommendation['as']) {
+                $new_entry['type'] = $recommendation['type'];
+            }
+
+            if (!empty($recommendation['crossorigin'])) {
+                $new_entry['crossorigin'] = $recommendation['crossorigin'];
+            }
+
+            if (!empty($recommendation['media'])) {
+                $new_entry['media'] = $recommendation['media'];
+            }
+
+            $preload_assets[] = $new_entry;
+            $settings['preload_assets'] = array_values($preload_assets);
+            update_option('suple_speed_settings', $settings);
+        }
+
+        unset($this->preload_recommendations[$id]);
+        unset($this->preload_rejections[$id]);
+
+        $this->save_preload_recommendations();
+        $this->save_preload_rejections();
+        $this->refresh_settings();
+
+        if ($this->logger) {
+            $this->logger->info('Preload recommendation accepted', [
+                'id' => $id,
+                'url' => $recommendation['url'],
+                'type' => $recommendation['as'],
+            ], 'assets');
+        }
+
+        wp_send_json_success([
+            'message' => __('Preload added successfully.', 'suple-speed'),
+            'recommendations' => $this->prepare_preload_recommendations_for_output($this->preload_recommendations)
+        ]);
+    }
+
+    /**
+     * AJAX: Rechazar una recomendación de precarga
+     */
+    public function ajax_reject_preload_recommendation() {
+        check_ajax_referer('suple_speed_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_die('Unauthorized');
+        }
+
+        $id = isset($_POST['id']) ? sanitize_text_field(wp_unslash($_POST['id'])) : '';
+
+        if (!$id) {
+            wp_send_json_error(__('Invalid recommendation identifier.', 'suple-speed'));
+        }
+
+        if (isset($this->preload_recommendations[$id])) {
+            unset($this->preload_recommendations[$id]);
+            $this->save_preload_recommendations();
+        }
+
+        $this->preload_rejections[$id] = time();
+        $this->save_preload_rejections();
+
+        if ($this->logger) {
+            $this->logger->info('Preload recommendation rejected', [
+                'id' => $id,
+            ], 'assets');
+        }
+
+        wp_send_json_success([
+            'message' => __('We will stop suggesting this asset.', 'suple-speed'),
+            'recommendations' => $this->prepare_preload_recommendations_for_output($this->preload_recommendations)
+        ]);
+    }
+
     /**
      * AJAX: Escanear handles activos
      */
     public function ajax_scan_handles() {
         check_ajax_referer('suple_speed_nonce', 'nonce');
-        
+
         if (!current_user_can('manage_options')) {
             wp_die('Unauthorized');
         }

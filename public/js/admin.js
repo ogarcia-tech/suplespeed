@@ -33,15 +33,31 @@
             
             // Guardar configuración
             $(document).on('click', '.suple-save-settings', this.saveSettings);
+            $(document).on('click', '.suple-save-cdn-settings', this.saveCdnSettings);
             
             // Resetear configuración
             $(document).on('click', '.suple-reset-settings', this.resetSettings);
             
             // Exportar configuración
             $(document).on('click', '.suple-export-settings', this.exportSettings);
-            
+
             // Importar configuración
             $(document).on('change', '#suple-import-file', this.importSettings);
+
+            // Importar reglas
+            $(document).on('click', '.suple-import-rules', this.importRules);
+
+            // Limpiar caché LQIP
+            $(document).on('click', '.suple-images-clear-lqip', this.clearLqipCache);
+
+            // Exportar logs
+            $(document).on('click', '.suple-export-logs', this.exportLogs);
+
+            // Limpiar logs
+            $(document).on('click', '.suple-clear-logs', this.clearLogs);
+
+            // Probar calentamiento de caché
+            $(document).on('click', '.suple-test-cache', this.testCacheWarmup);
             
             // Aplicar sugerencias PSI
             $(document).on('click', '.suple-apply-suggestion', this.applySuggestion);
@@ -57,9 +73,11 @@
             $(document).on('click', '.suple-save-manual-groups', this.saveManualGroups.bind(this));
             $(document).on('click', '.suple-regenerate-bundles', this.regenerateBundles.bind(this));
 
+
             $(document).on('click', '.suple-clean-revisions', this.cleanRevisions);
             $(document).on('click', '.suple-clean-transients', this.cleanTransients);
             $(document).on('click', '.suple-optimize-tables', this.optimizeTables);
+
         },
 
         initComponents: function() {
@@ -385,9 +403,21 @@
                 $button.text(originalText);
                 $button.prop('disabled', false);
                 SupleSpeedAdmin.showNotice('success', data.message);
-                
+
                 // Actualizar estadísticas si están visibles
                 SupleSpeedAdmin.updateCacheStats();
+
+                if (data.cdn_results) {
+                    const results = Array.isArray(data.cdn_results)
+                        ? data.cdn_results
+                        : Object.values(data.cdn_results);
+
+                    results.forEach(function(result) {
+                        if (!result || !result.message) return;
+
+                        SupleSpeedAdmin.showNotice(result.success ? 'success' : 'error', result.message);
+                    });
+                }
             }, function(error) {
                 $button.text(originalText);
                 $button.prop('disabled', false);
@@ -601,6 +631,42 @@
             });
         },
 
+        saveCdnSettings: function(e) {
+            e.preventDefault();
+
+            const $button = $(this);
+            const $form = $button.closest('form');
+            const originalText = $button.text();
+
+            const payload = {
+                cloudflare: {
+                    enabled: $form.find('[name="cdn_cloudflare_enabled"]').is(':checked'),
+                    api_token: ($form.find('[name="cdn_cloudflare_api_token"]').val() || '').trim(),
+                    zone_id: ($form.find('[name="cdn_cloudflare_zone_id"]').val() || '').trim()
+                },
+                bunnycdn: {
+                    enabled: $form.find('[name="cdn_bunnycdn_enabled"]').is(':checked'),
+                    api_key: ($form.find('[name="cdn_bunnycdn_api_key"]').val() || '').trim(),
+                    zone_id: ($form.find('[name="cdn_bunnycdn_zone_id"]').val() || '').trim()
+                }
+            };
+
+            $button.html('<span class="suple-spinner"></span> ' + supleSpeedAdmin.strings.processing);
+            $button.prop('disabled', true);
+
+            SupleSpeedAdmin.ajaxRequest('save_cdn_settings', {
+                cdn: payload
+            }, function(data) {
+                $button.text(originalText);
+                $button.prop('disabled', false);
+                SupleSpeedAdmin.showNotice('success', data.message || (supleSpeedAdmin.strings.success || 'Saved'));
+            }, function(error) {
+                $button.text(originalText);
+                $button.prop('disabled', false);
+                SupleSpeedAdmin.showNotice('error', error || supleSpeedAdmin.strings.error);
+            });
+        },
+
         resetSettings: function(e) {
             e.preventDefault();
             
@@ -653,7 +719,7 @@
         importSettings: function(e) {
             const file = e.target.files[0];
             if (!file) return;
-            
+
             const formData = new FormData();
             formData.append('action', 'suple_speed_import_settings');
             formData.append('nonce', supleSpeedAdmin.nonce);
@@ -683,9 +749,216 @@
             });
         },
 
+        importRules: function(e) {
+            e.preventDefault();
+
+            const $button = $(this);
+            const $fileInput = $('<input type="file" accept="application/json" style="display:none;">');
+
+            $('body').append($fileInput);
+
+            $fileInput.on('change', function() {
+                const file = this.files[0];
+
+                if (!file) {
+                    $fileInput.remove();
+                    return;
+                }
+
+                const originalHtml = $button.html();
+                $button.html('<span class="suple-spinner"></span> ' + supleSpeedAdmin.strings.processing);
+                $button.prop('disabled', true);
+
+                const formData = new FormData();
+                formData.append('action', 'suple_speed_import_rules');
+                formData.append('nonce', supleSpeedAdmin.nonce);
+                formData.append('rules_file', file);
+                formData.append('replace', $button.data('replace') ? '1' : '0');
+
+                $.ajax({
+                    url: supleSpeedAdmin.ajaxUrl,
+                    type: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    success: function(response) {
+                        $button.html(originalHtml);
+                        $button.prop('disabled', false);
+
+                        if (response && response.success) {
+                            const data = response.data || {};
+                            SupleSpeedAdmin.showNotice('success', data.message || supleSpeedAdmin.strings.success);
+
+                            if (data.reload) {
+                                setTimeout(function() {
+                                    window.location.reload();
+                                }, 1500);
+                            }
+                        } else {
+                            const message = response && response.data ? response.data : supleSpeedAdmin.strings.error;
+                            SupleSpeedAdmin.showNotice('error', message);
+                        }
+                    },
+                    error: function(xhr) {
+                        $button.html(originalHtml);
+                        $button.prop('disabled', false);
+
+                        let message = supleSpeedAdmin.strings.error;
+
+                        if (xhr && xhr.responseJSON && xhr.responseJSON.data) {
+                            message = xhr.responseJSON.data;
+                        }
+
+                        SupleSpeedAdmin.showNotice('error', message);
+                    },
+                    complete: function() {
+                        $fileInput.remove();
+                    }
+                });
+            });
+
+            $fileInput.trigger('click');
+        },
+
+        clearLqipCache: function(e) {
+            e.preventDefault();
+
+            const $button = $(this);
+            const originalHtml = $button.html();
+
+            $button.html('<span class="suple-spinner"></span> ' + supleSpeedAdmin.strings.processing);
+            $button.prop('disabled', true);
+
+            SupleSpeedAdmin.ajaxRequest('clear_lqip_cache', {}, function(data) {
+                $button.html(originalHtml);
+                $button.prop('disabled', false);
+
+                const message = data && data.message
+                    ? data.message
+                    : (supleSpeedAdmin.strings.success || 'Done');
+
+                SupleSpeedAdmin.showNotice('success', message);
+            }, function(error) {
+                $button.html(originalHtml);
+                $button.prop('disabled', false);
+                SupleSpeedAdmin.showNotice('error', error);
+            });
+        },
+
+        exportLogs: function(e) {
+            e.preventDefault();
+
+            const $button = $(this);
+            const originalHtml = $button.html();
+            const format = $button.data('format') || 'json';
+
+            $button.html('<span class="suple-spinner"></span> ' + supleSpeedAdmin.strings.processing);
+            $button.prop('disabled', true);
+
+            const payload = {
+                format: format,
+                level: $('#log-level-filter').val() || '',
+                module: $('#log-module-filter').val() || '',
+                days: $('#log-days-filter').val() || ''
+            };
+
+            SupleSpeedAdmin.ajaxRequest('export_logs', payload, function(data) {
+                $button.html(originalHtml);
+                $button.prop('disabled', false);
+
+                if (data && data.content && data.filename) {
+                    const blob = new Blob([data.content], { type: data.mime || 'application/json' });
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = url;
+                    a.download = data.filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                }
+
+                const message = data && data.message
+                    ? data.message
+                    : (supleSpeedAdmin.strings.success || 'Done');
+
+                SupleSpeedAdmin.showNotice('success', message);
+            }, function(error) {
+                $button.html(originalHtml);
+                $button.prop('disabled', false);
+                SupleSpeedAdmin.showNotice('error', error);
+            });
+        },
+
+        clearLogs: function(e) {
+            e.preventDefault();
+
+            if (!confirm(supleSpeedAdmin.strings.confirmClearLogs)) {
+                return;
+            }
+
+            const $button = $(this);
+            const originalHtml = $button.html();
+
+            $button.html('<span class="suple-spinner"></span> ' + supleSpeedAdmin.strings.processing);
+            $button.prop('disabled', true);
+
+            const payload = {
+                level: $('#log-level-filter').val() || '',
+                module: $('#log-module-filter').val() || '',
+                days: $('#log-days-filter').val() || ''
+            };
+
+            SupleSpeedAdmin.ajaxRequest('clear_logs', payload, function(data) {
+                $button.html(originalHtml);
+                $button.prop('disabled', false);
+
+                const message = data && data.message
+                    ? data.message
+                    : (supleSpeedAdmin.strings.success || 'Done');
+
+                SupleSpeedAdmin.showNotice('success', message);
+            }, function(error) {
+                $button.html(originalHtml);
+                $button.prop('disabled', false);
+                SupleSpeedAdmin.showNotice('error', error);
+            });
+        },
+
+        testCacheWarmup: function(e) {
+            e.preventDefault();
+
+            const $button = $(this);
+            const originalHtml = $button.html();
+            const url = $button.data('url') || supleSpeedAdmin.homeUrl || window.location.origin;
+
+            $button.html('<span class="suple-spinner"></span> ' + supleSpeedAdmin.strings.processing);
+            $button.prop('disabled', true);
+
+            SupleSpeedAdmin.ajaxRequest('test_cache_warmup', { url: url }, function(data) {
+                $button.html(originalHtml);
+                $button.prop('disabled', false);
+
+                let message = data && data.message
+                    ? data.message
+                    : (supleSpeedAdmin.strings.success || 'Done');
+
+                if (data && data.response_time) {
+                    message += ' (' + data.response_time + 's)';
+                }
+
+                SupleSpeedAdmin.showNotice('success', message);
+            }, function(error) {
+                $button.html(originalHtml);
+                $button.prop('disabled', false);
+                SupleSpeedAdmin.showNotice('error', error);
+            });
+        },
+
         applySuggestion: function(e) {
             e.preventDefault();
-            
+
             const $button = $(this);
             const suggestionId = $button.data('suggestion-id');
             const testId = $button.data('test-id');
@@ -894,7 +1167,7 @@
         },
 
         initializeAssetsUI: function() {
-            const hasAssetsUI = $('#handles-results').length > 0 || $('#bundle-status').length > 0;
+            const hasAssetsUI = $('#handles-results').length > 0 || $('#bundle-status').length > 0 || $('#suple-preload-recommendations').length > 0;
 
             if (!hasAssetsUI) {
                 return;
@@ -906,9 +1179,11 @@
             this.assetHandles = this.assetHandles || { css: {}, js: {} };
             this.manualDirty = false;
             this.needsRegeneration = false;
+            this.preloadRecommendations = supleSpeedAdmin.preloadRecommendations || [];
 
             this.renderManualGroupsTable();
             this.updateBundleStatus(this.bundleStatus);
+            this.renderPreloadRecommendations(this.preloadRecommendations);
         },
 
         renderManualGroupsTable: function() {
@@ -1030,6 +1305,195 @@
             $container.html(html);
 
             $('.suple-regenerate-bundles').prop('disabled', !this.needsRegeneration);
+        },
+
+        renderPreloadRecommendations: function(list) {
+            const $container = $('#suple-preload-recommendations');
+            if ($container.length === 0) return;
+
+            const labels = supleSpeedAdmin.labels || {};
+            const strings = supleSpeedAdmin.strings || {};
+            const emptyMessage = $container.data('emptyMessage') || strings.preloadNoSuggestions || '';
+            const recommendations = Array.isArray(list) ? list : [];
+            this.preloadRecommendations = recommendations;
+
+            if (recommendations.length === 0) {
+                const message = emptyMessage ? this.escapeHtml(emptyMessage) : '';
+                $container.html(message ? '<p class="suple-muted">' + message + '</p>' : '');
+                return;
+            }
+
+            let html = '<table class="suple-table">';
+            html += '<thead><tr>' +
+                '<th>' + this.escapeHtml(labels.type || 'Type') + '</th>' +
+                '<th>' + this.escapeHtml(labels.resource || 'Resource') + '</th>' +
+                '<th>' + this.escapeHtml(labels.size || 'Size') + '</th>' +
+                '<th>' + this.escapeHtml(labels.seenOn || 'Seen on') + '</th>' +
+                '<th>' + this.escapeHtml(labels.position || 'Position') + '</th>' +
+                '<th>' + this.escapeHtml(labels.actions || 'Actions') + '</th>' +
+                '</tr></thead><tbody>';
+
+            const self = this;
+
+            recommendations.forEach(function(rec) {
+                const id = self.escapeHtml(rec.id || '');
+                const type = rec.type || rec.as || '';
+                const typeLabel = type ? self.escapeHtml(type.charAt(0).toUpperCase() + type.slice(1)) : self.escapeHtml(strings.unknown || 'Unknown');
+                const url = rec.url ? self.escapeHtml(rec.url) : '';
+                const size = typeof rec.size === 'number' && rec.size > 0 ? self.escapeHtml(self.formatBytes(rec.size)) : '&mdash;';
+                const pages = Array.isArray(rec.pages) ? rec.pages : [];
+                const crossoriginLabel = strings.crossorigin || 'crossorigin';
+                const crossorigin = rec.crossorigin ? '<br><small>' + self.escapeHtml(crossoriginLabel + ': ' + rec.crossorigin) + '</small>' : '';
+                const position = rec.position ? '#' + self.escapeHtml(rec.position) : '&mdash;';
+
+                let pagesHtml = '&mdash;';
+                if (pages.length > 0) {
+                    pagesHtml = pages.map(function(page) {
+                        const escaped = self.escapeHtml(page);
+                        return '<div><a href="' + escaped + '" target="_blank" rel="noopener">' + escaped + '</a></div>';
+                    }).join('');
+                }
+
+                html += '<tr data-id="' + id + '">' +
+                    '<td><span class="suple-badge">' + typeLabel + '</span>' + crossorigin + '</td>' +
+                    '<td>' + (url ? '<code>' + url + '</code>' : '&mdash;') + '</td>' +
+                    '<td>' + size + '</td>' +
+                    '<td>' + pagesHtml + '</td>' +
+                    '<td>' + position + '</td>' +
+                    '<td>' +
+                        '<div class="suple-flex suple-gap-0-5 suple-flex-wrap">' +
+                            '<button type="button" class="suple-button success suple-accept-preload" data-id="' + id + '"><span class="dashicons dashicons-upload"></span> ' + self.escapeHtml(strings.addPreload || 'Add preload') + '</button>' +
+                            '<button type="button" class="suple-button secondary suple-reject-preload" data-id="' + id + '"><span class="dashicons dashicons-no-alt"></span> ' + self.escapeHtml(strings.dismiss || 'Dismiss') + '</button>' +
+                        '</div>' +
+                    '</td>' +
+                    '</tr>';
+            });
+
+            html += '</tbody></table>';
+
+            $container.html(html);
+        },
+
+        runPreloadCollector: function(e) {
+            e.preventDefault();
+
+            const $button = $(e.currentTarget);
+            if ($button.prop('disabled')) return;
+
+            const strings = supleSpeedAdmin.strings || {};
+            const originalHtml = $button.html();
+            const loadingText = strings.preloadCollecting || strings.processing || 'Processing…';
+
+            $button.data('originalHtml', originalHtml);
+            $button.prop('disabled', true).html('<span class="suple-spinner"></span> ' + this.escapeHtml(loadingText));
+
+            const self = this;
+
+            this.ajaxRequest('generate_preload_recommendations', {}, function(response) {
+                const message = response && response.message ? response.message : (strings.success || 'Done');
+                $button.prop('disabled', false).html(originalHtml);
+
+                if (response && response.recommendations) {
+                    self.renderPreloadRecommendations(response.recommendations);
+                }
+
+                self.showNotice('success', message);
+            }, function(error) {
+                const errorMessage = error || strings.preloadCollectorError || strings.error || 'Error';
+                $button.prop('disabled', false).html(originalHtml);
+                self.showNotice('error', errorMessage);
+            });
+        },
+
+        refreshPreloadRecommendations: function(e) {
+            e.preventDefault();
+
+            const $button = $(e.currentTarget);
+            if ($button.prop('disabled')) return;
+
+            const strings = supleSpeedAdmin.strings || {};
+            const originalHtml = $button.html();
+
+            $button.data('originalHtml', originalHtml);
+            $button.prop('disabled', true).html('<span class="suple-spinner"></span> ' + this.escapeHtml(strings.processing || 'Processing…'));
+
+            const self = this;
+
+            this.ajaxRequest('get_preload_recommendations', {}, function(response) {
+                $button.prop('disabled', false).html(originalHtml);
+
+                if (response && response.recommendations) {
+                    self.renderPreloadRecommendations(response.recommendations);
+                }
+            }, function(error) {
+                const errorMessage = error || strings.error || 'Error';
+                $button.prop('disabled', false).html(originalHtml);
+                self.showNotice('error', errorMessage);
+            });
+        },
+
+        acceptPreloadRecommendation: function(e) {
+            e.preventDefault();
+
+            const $button = $(e.currentTarget);
+            if ($button.prop('disabled')) return;
+
+            const id = $button.data('id');
+            if (!id) return;
+
+            const strings = supleSpeedAdmin.strings || {};
+            const originalHtml = $button.html();
+
+            $button.prop('disabled', true).html('<span class="suple-spinner"></span>');
+
+            const self = this;
+
+            this.ajaxRequest('accept_preload_recommendation', { id: id }, function(response) {
+                $button.prop('disabled', false).html(originalHtml);
+
+                if (response && response.recommendations) {
+                    self.renderPreloadRecommendations(response.recommendations);
+                }
+
+                const message = response && response.message ? response.message : (strings.preloadAcceptSuccess || strings.success || 'Saved');
+                self.showNotice('success', message);
+            }, function(error) {
+                const errorMessage = error || strings.error || 'Error';
+                $button.prop('disabled', false).html(originalHtml);
+                self.showNotice('error', errorMessage);
+            });
+        },
+
+        rejectPreloadRecommendation: function(e) {
+            e.preventDefault();
+
+            const $button = $(e.currentTarget);
+            if ($button.prop('disabled')) return;
+
+            const id = $button.data('id');
+            if (!id) return;
+
+            const strings = supleSpeedAdmin.strings || {};
+            const originalHtml = $button.html();
+
+            $button.prop('disabled', true).html('<span class="suple-spinner"></span>');
+
+            const self = this;
+
+            this.ajaxRequest('reject_preload_recommendation', { id: id }, function(response) {
+                $button.prop('disabled', false).html(originalHtml);
+
+                if (response && response.recommendations) {
+                    self.renderPreloadRecommendations(response.recommendations);
+                }
+
+                const message = response && response.message ? response.message : (strings.preloadDismissed || strings.success || 'Done');
+                self.showNotice('success', message);
+            }, function(error) {
+                const errorMessage = error || strings.error || 'Error';
+                $button.prop('disabled', false).html(originalHtml);
+                self.showNotice('error', errorMessage);
+            });
         },
 
         onManualGroupChange: function(e) {
@@ -1670,6 +2134,46 @@
                     SupleSpeedAdmin.showNotice('error', errorMessage);
                 });
             });
+
+            $(document).on('click', '.suple-onboarding-dismiss', function(e) {
+                e.preventDefault();
+
+                const $button = $(this);
+                if ($button.prop('disabled')) {
+                    return;
+                }
+
+                const $container = $button.closest('.suple-onboarding');
+                if ($container.length === 0) {
+                    return;
+                }
+
+                SupleSpeedAdmin.updateOnboardingDismissed($container, true);
+            });
+
+            $(document).on('click', '.suple-onboarding-reopen', function(e) {
+                e.preventDefault();
+
+                const $button = $(this);
+                if ($button.prop('disabled')) {
+                    return;
+                }
+
+                const $container = $button.closest('.suple-onboarding');
+                if ($container.length === 0) {
+                    return;
+                }
+
+                SupleSpeedAdmin.updateOnboardingDismissed($container, false);
+            });
+
+            $guide.each(function() {
+                const $container = $(this);
+                const dismissedAttr = $container.attr('data-dismissed');
+                const isDismissed = dismissedAttr === '1' || dismissedAttr === 1 || dismissedAttr === true;
+
+                SupleSpeedAdmin.applyOnboardingState($container, isDismissed);
+            });
         },
 
         updateOnboardingProgress: function($container, data) {
@@ -1716,6 +2220,65 @@
                     const successText = $status.data('success-text') || '';
                     $status.removeClass('warning').addClass('success').text(successText);
                 }
+            }
+
+            if (typeof data.dismissed !== 'undefined') {
+                const isDismissed = data.dismissed === true || data.dismissed === 1 || data.dismissed === '1';
+                SupleSpeedAdmin.applyOnboardingState($container, isDismissed);
+            }
+        },
+
+        updateOnboardingDismissed: function($container, dismissed) {
+            if (!$container || $container.length === 0) {
+                return;
+            }
+
+            const $buttons = $container.find('.suple-onboarding-dismiss, .suple-onboarding-reopen');
+            $buttons.prop('disabled', true);
+
+            SupleSpeedAdmin.ajaxRequest('update_onboarding', {
+                dismissed: dismissed ? 1 : 0
+            }, function(data) {
+                $buttons.prop('disabled', false);
+
+                if (data) {
+                    SupleSpeedAdmin.updateOnboardingProgress($container, data);
+                }
+            }, function(error) {
+                $buttons.prop('disabled', false);
+
+                const errorMessage = (error && error.message)
+                    ? error.message
+                    : (typeof error === 'string' && error)
+                        ? error
+                        : (supleSpeedAdmin.strings && supleSpeedAdmin.strings.error) || 'An error occurred';
+
+                SupleSpeedAdmin.showNotice('error', errorMessage);
+            });
+        },
+
+        applyOnboardingState: function($container, dismissed) {
+            if (!$container || $container.length === 0) {
+                return;
+            }
+
+            const isDismissed = dismissed === true || dismissed === 1 || dismissed === '1';
+            $container.toggleClass('is-dismissed', isDismissed);
+            $container.attr('data-dismissed', isDismissed ? '1' : '0');
+
+            const $body = $container.find('.suple-onboarding-body');
+            if ($body.length) {
+                $body.attr('aria-hidden', isDismissed ? 'true' : 'false');
+            }
+
+            const $dismissButton = $container.find('.suple-onboarding-dismiss');
+            if ($dismissButton.length) {
+                $dismissButton.attr('aria-expanded', isDismissed ? 'false' : 'true');
+            }
+
+            const $reopenButton = $container.find('.suple-onboarding-reopen');
+            if ($reopenButton.length) {
+                $reopenButton.attr('aria-expanded', isDismissed ? 'false' : 'true');
             }
         },
 

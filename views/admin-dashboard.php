@@ -131,7 +131,46 @@ if ($fonts_module && method_exists($fonts_module, 'get_font_preloads')) {
 }
 
 $asset_preloads = $current_settings['preload_assets'] ?? [];
-$critical_css   = $current_settings['critical_css'] ?? '';
+$critical_css   = $current_settings['critical_css_general'] ?? '';
+
+$critical_css_status_defaults = [
+    'status'       => 'idle',
+    'message'      => '',
+    'url'          => '',
+    'created_at'   => 0,
+    'started_at'   => 0,
+    'completed_at' => 0,
+    'duration'     => 0,
+    'css_length'   => 0,
+    'error_code'   => '',
+];
+$critical_css_status = wp_parse_args($dashboard_data['critical_css_status'] ?? [], $critical_css_status_defaults);
+$critical_css_status_label_map = [
+    'idle'       => __('Idle', 'suple-speed'),
+    'pending'    => __('Pending', 'suple-speed'),
+    'processing' => __('Processing', 'suple-speed'),
+    'success'    => __('Completed', 'suple-speed'),
+    'error'      => __('Failed', 'suple-speed'),
+];
+$critical_css_status_label = $critical_css_status_label_map[$critical_css_status['status']] ?? ucfirst($critical_css_status['status']);
+$critical_css_date_format = get_option('date_format') . ' ' . get_option('time_format');
+$critical_css_created_at = $critical_css_status['created_at'] ? date_i18n($critical_css_date_format, (int) $critical_css_status['created_at']) : '';
+$critical_css_started_at = $critical_css_status['started_at'] ? date_i18n($critical_css_date_format, (int) $critical_css_status['started_at']) : '';
+$critical_css_completed_at = $critical_css_status['completed_at'] ? date_i18n($critical_css_date_format, (int) $critical_css_status['completed_at']) : '';
+$critical_css_duration = '';
+if (!empty($critical_css_status['duration'])) {
+    if (!empty($critical_css_status['started_at']) && !empty($critical_css_status['completed_at'])) {
+        $critical_css_duration = human_time_diff((int) $critical_css_status['started_at'], (int) $critical_css_status['completed_at']);
+    }
+
+    if (empty($critical_css_duration)) {
+        $critical_css_duration = sprintf(
+            _n('%s second', '%s seconds', (int) $critical_css_status['duration'], 'suple-speed'),
+            number_format_i18n((int) $critical_css_status['duration'])
+        );
+    }
+}
+
 
 $compat_module = function_exists('suple_speed') ? suple_speed()->compat : null;
 $compat_report_defaults = [
@@ -170,6 +209,7 @@ $database_defaults = [
     'last_optimization_human'     => null,
 ];
 $database_stats = wp_parse_args($dashboard_data['database_stats'] ?? [], $database_defaults);
+
 
 $cache_module = function_exists('suple_speed') ? suple_speed()->cache : null;
 $logger_module = function_exists('suple_speed') ? suple_speed()->logger : null;
@@ -223,6 +263,9 @@ if (!is_array($onboarding_state)) {
     $onboarding_state = [];
 }
 
+$onboarding_dismissed = !empty($onboarding_state['dismissed']);
+$onboarding_body_id   = 'suple-onboarding-body-' . uniqid();
+
 $onboarding_total = count($onboarding_steps);
 $onboarding_completed = 0;
 
@@ -275,36 +318,62 @@ $onboarding_critical_labels = array_map(function($step) {
 
     <!-- Getting Started -->
     <?php if ($onboarding_total > 0): ?>
-    <div class="suple-card suple-onboarding" data-total="<?php echo esc_attr($onboarding_total); ?>" data-completed="<?php echo esc_attr($onboarding_completed); ?>">
+    <div class="suple-card suple-onboarding <?php echo $onboarding_dismissed ? 'is-dismissed' : ''; ?>"
+         data-total="<?php echo esc_attr($onboarding_total); ?>"
+         data-completed="<?php echo esc_attr($onboarding_completed); ?>"
+         data-dismissed="<?php echo $onboarding_dismissed ? '1' : '0'; ?>">
         <div class="suple-onboarding-head">
-            <h3><?php _e('Guía rápida', 'suple-speed'); ?></h3>
-            <span class="suple-onboarding-progress-count"><?php echo esc_html(sprintf('%d/%d', $onboarding_completed, $onboarding_total)); ?></span>
-        </div>
-
-        <div class="suple-onboarding-progress">
-            <div class="suple-onboarding-progress-bar">
-                <span class="suple-onboarding-progress-bar-fill" style="width: <?php echo esc_attr($onboarding_progress); ?>%;"></span>
+            <div class="suple-onboarding-title">
+                <h3><?php _e('Guía rápida', 'suple-speed'); ?></h3>
+                <span class="suple-onboarding-progress-count"><?php echo esc_html(sprintf('%d/%d', $onboarding_completed, $onboarding_total)); ?></span>
             </div>
-            <span class="suple-onboarding-progress-label"><?php echo esc_html($onboarding_progress); ?>%</span>
+            <div class="suple-onboarding-actions">
+                <button type="button"
+                        class="suple-onboarding-toggle suple-onboarding-dismiss"
+                        aria-controls="<?php echo esc_attr($onboarding_body_id); ?>"
+                        aria-expanded="<?php echo $onboarding_dismissed ? 'false' : 'true'; ?>">
+                    <span class="dashicons dashicons-no-alt" aria-hidden="true"></span>
+                    <span><?php _e('Ocultar', 'suple-speed'); ?></span>
+                </button>
+                <button type="button"
+                        class="suple-onboarding-toggle suple-onboarding-reopen"
+                        aria-controls="<?php echo esc_attr($onboarding_body_id); ?>"
+                        aria-expanded="<?php echo $onboarding_dismissed ? 'false' : 'true'; ?>">
+                    <span class="dashicons dashicons-visibility" aria-hidden="true"></span>
+                    <span><?php _e('Mostrar', 'suple-speed'); ?></span>
+                </button>
+            </div>
         </div>
 
-        <p class="suple-onboarding-status <?php echo empty($onboarding_critical_remaining) ? 'success' : 'warning'; ?>"
-           data-warning-template="<?php echo esc_attr__('Quedan %1$s pasos críticos por completar: %2$s', 'suple-speed'); ?>"
-           data-success-text="<?php echo esc_attr__('¡Listo! Todas las optimizaciones críticas están activas.', 'suple-speed'); ?>">
-            <?php if (empty($onboarding_critical_remaining)): ?>
-                <?php _e('¡Listo! Todas las optimizaciones críticas están activas.', 'suple-speed'); ?>
-            <?php else: ?>
-                <?php
-                printf(
-                    esc_html__('Quedan %1$s pasos críticos por completar: %2$s', 'suple-speed'),
-                    count($onboarding_critical_remaining),
-                    esc_html(implode(', ', $onboarding_critical_labels))
-                );
-                ?>
-            <?php endif; ?>
+        <p class="suple-onboarding-collapsed-message" role="status">
+            <?php _e('Has ocultado la guía rápida. Puedes reabrirla cuando quieras.', 'suple-speed'); ?>
         </p>
 
-        <div class="suple-onboarding-steps">
+        <div class="suple-onboarding-body" id="<?php echo esc_attr($onboarding_body_id); ?>" aria-hidden="<?php echo $onboarding_dismissed ? 'true' : 'false'; ?>">
+            <div class="suple-onboarding-progress">
+                <div class="suple-onboarding-progress-bar">
+                    <span class="suple-onboarding-progress-bar-fill" style="width: <?php echo esc_attr($onboarding_progress); ?>%;"></span>
+                </div>
+                <span class="suple-onboarding-progress-label"><?php echo esc_html($onboarding_progress); ?>%</span>
+            </div>
+
+            <p class="suple-onboarding-status <?php echo empty($onboarding_critical_remaining) ? 'success' : 'warning'; ?>"
+               data-warning-template="<?php echo esc_attr__('Quedan %1$s pasos críticos por completar: %2$s', 'suple-speed'); ?>"
+               data-success-text="<?php echo esc_attr__('¡Listo! Todas las optimizaciones críticas están activas.', 'suple-speed'); ?>">
+                <?php if (empty($onboarding_critical_remaining)): ?>
+                    <?php _e('¡Listo! Todas las optimizaciones críticas están activas.', 'suple-speed'); ?>
+                <?php else: ?>
+                    <?php
+                    printf(
+                        esc_html__('Quedan %1$s pasos críticos por completar: %2$s', 'suple-speed'),
+                        count($onboarding_critical_remaining),
+                        esc_html(implode(', ', $onboarding_critical_labels))
+                    );
+                    ?>
+                <?php endif; ?>
+            </p>
+
+            <div class="suple-onboarding-steps">
             <?php foreach ($onboarding_steps as $step_key => $step):
                 $completed = !empty($onboarding_state[$step_key]);
                 $links = $step['links'] ?? [];
@@ -344,6 +413,7 @@ $onboarding_critical_labels = array_map(function($step) {
                 </div>
             </label>
             <?php endforeach; ?>
+            </div>
         </div>
     </div>
     <?php endif; ?>
@@ -849,8 +919,8 @@ $onboarding_critical_labels = array_map(function($step) {
                             <?php echo !empty($current_settings['compression_enabled']) ? esc_html__('Enabled', 'suple-speed') : esc_html__('Disabled', 'suple-speed'); ?>
                         </li>
                         <li>
-                            <strong><?php _e('Logged-in Cache', 'suple-speed'); ?>:</strong>
-                            <?php echo !empty($current_settings['cache_logged_users']) ? esc_html__('Enabled', 'suple-speed') : esc_html__('Disabled', 'suple-speed'); ?>
+                            <strong><?php _e('Critical CSS', 'suple-speed'); ?>:</strong>
+                            <?php echo !empty($current_settings['critical_css_enabled']) ? esc_html__('Enabled', 'suple-speed') : esc_html__('Disabled', 'suple-speed'); ?>
                         </li>
                     </ul>
                     <a class="suple-button" href="<?php echo esc_url(admin_url('admin.php?page=suple-speed-settings#tab-cache')); ?>">
@@ -962,6 +1032,90 @@ $onboarding_critical_labels = array_map(function($step) {
             </div>
 
             <div class="suple-card suple-mt-2">
+                <h3><?php _e('Generate Critical CSS on demand', 'suple-speed'); ?></h3>
+                <p><?php _e('Request a fresh critical CSS snippet using your configured API service. The job runs in the background so you can keep working without waiting.', 'suple-speed'); ?></p>
+
+                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="suple-form suple-mt-1">
+                    <?php wp_nonce_field('suple_speed_generate_critical_css'); ?>
+                    <input type="hidden" name="action" value="suple_speed_generate_critical_css">
+
+                    <div class="suple-form-group">
+                        <label for="suple-critical-css-url" class="suple-form-label"><?php _e('Target URL', 'suple-speed'); ?></label>
+                        <input type="url" id="suple-critical-css-url" name="critical_css_url" class="suple-form-input" required
+                               placeholder="https://example.com/"
+                               value="<?php echo esc_attr($critical_css_status['url'] ?: home_url('/')); ?>">
+                    </div>
+
+                    <div class="suple-form-actions">
+                        <button type="submit" class="suple-button">
+                            <span class="dashicons dashicons-update"></span>
+                            <?php _e('Generate Critical CSS', 'suple-speed'); ?>
+                        </button>
+                        <?php if (!empty($critical_css_status['url']) && in_array($critical_css_status['status'], ['error', 'success'], true)): ?>
+                            <button type="submit" name="retry" value="1" class="suple-button suple-button-secondary">
+                                <?php _e('Retry last URL', 'suple-speed'); ?>
+                            </button>
+                        <?php endif; ?>
+                    </div>
+                </form>
+
+                <div class="suple-mt-2">
+                    <h4><?php _e('Latest job summary', 'suple-speed'); ?></h4>
+                    <ul class="suple-list">
+                        <li>
+                            <strong><?php _e('Status', 'suple-speed'); ?>:</strong>
+                            <?php echo esc_html($critical_css_status_label); ?>
+                            <?php if (!empty($critical_css_status['message'])): ?>
+                                — <span><?php echo esc_html($critical_css_status['message']); ?></span>
+                            <?php endif; ?>
+                        </li>
+                        <?php if (!empty($critical_css_status['url'])): ?>
+                            <li>
+                                <strong><?php _e('URL', 'suple-speed'); ?>:</strong>
+                                <code><?php echo esc_html($critical_css_status['url']); ?></code>
+                            </li>
+                        <?php endif; ?>
+                        <?php if (!empty($critical_css_created_at)): ?>
+                            <li>
+                                <strong><?php _e('Queued at', 'suple-speed'); ?>:</strong>
+                                <?php echo esc_html($critical_css_created_at); ?>
+                            </li>
+                        <?php endif; ?>
+                        <?php if (!empty($critical_css_started_at)): ?>
+                            <li>
+                                <strong><?php _e('Started at', 'suple-speed'); ?>:</strong>
+                                <?php echo esc_html($critical_css_started_at); ?>
+                            </li>
+                        <?php endif; ?>
+                        <?php if (!empty($critical_css_completed_at)): ?>
+                            <li>
+                                <strong><?php _e('Completed at', 'suple-speed'); ?>:</strong>
+                                <?php echo esc_html($critical_css_completed_at); ?>
+                            </li>
+                        <?php endif; ?>
+                        <?php if (!empty($critical_css_duration)): ?>
+                            <li>
+                                <strong><?php _e('Generation time', 'suple-speed'); ?>:</strong>
+                                <?php echo esc_html($critical_css_duration); ?>
+                            </li>
+                        <?php endif; ?>
+                        <?php if (!empty($critical_css_status['css_length'])): ?>
+                            <li>
+                                <strong><?php _e('CSS size', 'suple-speed'); ?>:</strong>
+                                <?php echo esc_html(sprintf(__('%s characters', 'suple-speed'), number_format_i18n((int) $critical_css_status['css_length']))); ?>
+                            </li>
+                        <?php endif; ?>
+                        <?php if (!empty($critical_css_status['error_code']) && $critical_css_status['status'] === 'error'): ?>
+                            <li>
+                                <strong><?php _e('Error code', 'suple-speed'); ?>:</strong>
+                                <code><?php echo esc_html($critical_css_status['error_code']); ?></code>
+                            </li>
+                        <?php endif; ?>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="suple-card suple-mt-2">
                 <h3><?php _e('Font Preloads', 'suple-speed'); ?></h3>
                 <?php if (!empty($font_preloads)): ?>
                     <table class="widefat">
@@ -1066,7 +1220,7 @@ $onboarding_critical_labels = array_map(function($step) {
                         </li>
                         <li>
                             <strong><?php _e('Modern Formats', 'suple-speed'); ?>:</strong>
-                            <?php echo !empty($current_settings['images_modern']) ? esc_html__('Enabled', 'suple-speed') : esc_html__('Disabled', 'suple-speed'); ?>
+                            <?php echo !empty($current_settings['images_webp_rewrite']) ? esc_html__('Enabled', 'suple-speed') : esc_html__('Disabled', 'suple-speed'); ?>
                         </li>
                     </ul>
                     <a class="suple-button" href="<?php echo esc_url(admin_url('admin.php?page=suple-speed-settings#tab-images')); ?>">
@@ -1434,6 +1588,73 @@ $onboarding_critical_labels = array_map(function($step) {
                         </button>
                     </div>
                 </div>
+            </div>
+
+            <div class="suple-card suple-mt-2">
+                <h3><?php _e('CDN Integrations', 'suple-speed'); ?></h3>
+                <p><?php _e('Store API credentials so Suple Speed can purge your CDN after clearing the local cache.', 'suple-speed'); ?></p>
+
+                <form id="suple-cdn-settings-form" class="suple-form suple-mt-1" autocomplete="off">
+                    <div class="suple-cdn-provider">
+                        <h4><?php _e('Cloudflare', 'suple-speed'); ?></h4>
+
+                        <div class="suple-form-row">
+                            <div class="suple-form-toggle">
+                                <div class="suple-toggle">
+                                    <input type="checkbox" id="cdn-cloudflare-enabled" name="cdn_cloudflare_enabled" <?php checked($cloudflare_cdn['enabled']); ?>>
+                                    <span class="suple-toggle-slider"></span>
+                                </div>
+                                <label for="cdn-cloudflare-enabled" class="suple-form-label"><?php _e('Enable Cloudflare purging', 'suple-speed'); ?></label>
+                            </div>
+                            <div class="suple-form-help"><?php _e('Trigger a Cloudflare cache purge whenever the local cache is cleared.', 'suple-speed'); ?></div>
+                        </div>
+
+                        <div class="suple-form-row">
+                            <label for="cdn-cloudflare-zone" class="suple-form-label"><?php _e('Zone ID', 'suple-speed'); ?></label>
+                            <input type="text" id="cdn-cloudflare-zone" name="cdn_cloudflare_zone_id" class="suple-form-input" value="<?php echo esc_attr($cloudflare_cdn['zone_id']); ?>" autocomplete="off">
+                            <div class="suple-form-help"><?php _e('Copy the Zone ID from your Cloudflare dashboard.', 'suple-speed'); ?></div>
+                        </div>
+
+                        <div class="suple-form-row">
+                            <label for="cdn-cloudflare-token" class="suple-form-label"><?php _e('API Token', 'suple-speed'); ?></label>
+                            <input type="password" id="cdn-cloudflare-token" name="cdn_cloudflare_api_token" class="suple-form-input" value="<?php echo esc_attr($cloudflare_cdn['api_token']); ?>" autocomplete="new-password">
+                            <div class="suple-form-help"><?php _e('Use a token with “Cache Purge” permissions.', 'suple-speed'); ?></div>
+                        </div>
+                    </div>
+
+                    <div class="suple-cdn-provider suple-mt-2">
+                        <h4><?php _e('BunnyCDN', 'suple-speed'); ?></h4>
+
+                        <div class="suple-form-row">
+                            <div class="suple-form-toggle">
+                                <div class="suple-toggle">
+                                    <input type="checkbox" id="cdn-bunny-enabled" name="cdn_bunnycdn_enabled" <?php checked($bunnycdn_cdn['enabled']); ?>>
+                                    <span class="suple-toggle-slider"></span>
+                                </div>
+                                <label for="cdn-bunny-enabled" class="suple-form-label"><?php _e('Enable BunnyCDN purging', 'suple-speed'); ?></label>
+                            </div>
+                            <div class="suple-form-help"><?php _e('Send purge requests to your BunnyCDN pull zone after local cache clears.', 'suple-speed'); ?></div>
+                        </div>
+
+                        <div class="suple-form-row">
+                            <label for="cdn-bunny-zone" class="suple-form-label"><?php _e('Pull Zone ID', 'suple-speed'); ?></label>
+                            <input type="text" id="cdn-bunny-zone" name="cdn_bunnycdn_zone_id" class="suple-form-input" value="<?php echo esc_attr($bunnycdn_cdn['zone_id']); ?>" autocomplete="off">
+                            <div class="suple-form-help"><?php _e('Enter the numeric ID or name of the pull zone to purge.', 'suple-speed'); ?></div>
+                        </div>
+
+                        <div class="suple-form-row">
+                            <label for="cdn-bunny-key" class="suple-form-label"><?php _e('API Key', 'suple-speed'); ?></label>
+                            <input type="password" id="cdn-bunny-key" name="cdn_bunnycdn_api_key" class="suple-form-input" value="<?php echo esc_attr($bunnycdn_cdn['api_key']); ?>" autocomplete="new-password">
+                            <div class="suple-form-help"><?php _e('Use the API Access Key from the BunnyCDN dashboard.', 'suple-speed'); ?></div>
+                        </div>
+                    </div>
+
+                    <div class="suple-button-group suple-mt-2">
+                        <button type="button" class="suple-button suple-save-cdn-settings">
+                            <?php _e('Save CDN Credentials', 'suple-speed'); ?>
+                        </button>
+                    </div>
+                </form>
             </div>
 
             <div class="suple-card suple-mt-2">
@@ -1887,3 +2108,11 @@ jQuery(document).ready(function($) {
     loadRecentActivity();
 });
 </script>
+.suple-cdn-provider + .suple-cdn-provider {
+    margin-top: 24px;
+}
+
+.suple-cdn-provider h4 {
+    margin-top: 0;
+}
+
