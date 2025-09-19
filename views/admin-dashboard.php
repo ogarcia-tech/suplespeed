@@ -84,6 +84,20 @@ if (empty($cache_stats['total_size_formatted'])) {
     $cache_stats['total_size_formatted'] = size_format((int) ($cache_stats['total_size'] ?? 0));
 }
 
+$images_defaults = [
+    'total_images_processed' => 0,
+    'lazy_loading_applied'   => 0,
+    'lqip_generated'         => 0,
+    'webp_conversions'       => 0,
+    'total_size_saved'       => 0,
+];
+$images_stats = wp_parse_args($dashboard_data['images_stats'] ?? [], $images_defaults);
+$images_stats['total_images_processed'] = number_format_i18n((int) $images_stats['total_images_processed']);
+$images_stats['lazy_loading_applied']   = number_format_i18n((int) $images_stats['lazy_loading_applied']);
+$images_stats['lqip_generated']         = number_format_i18n((int) $images_stats['lqip_generated']);
+$images_stats['webp_conversions']       = number_format_i18n((int) $images_stats['webp_conversions']);
+$images_stats['total_size_saved']       = size_format((int) $images_stats['total_size_saved']);
+
 $fonts_defaults = [
     'total_localized'      => 0,
     'total_size'           => 0,
