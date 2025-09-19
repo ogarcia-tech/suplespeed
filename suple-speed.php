@@ -45,6 +45,7 @@ class SupleSpeed {
      */
     public $admin;
     public $cache;
+    public $cdn;
     public $assets;
     public $fonts;
     public $images;
@@ -140,6 +141,7 @@ class SupleSpeed {
         require_once SUPLE_SPEED_PLUGIN_DIR . 'includes/class-compat.php';
         require_once SUPLE_SPEED_PLUGIN_DIR . 'includes/class-elementor-guard.php';
         require_once SUPLE_SPEED_PLUGIN_DIR . 'includes/class-rules.php';
+        require_once SUPLE_SPEED_PLUGIN_DIR . 'includes/class-cdn.php';
         require_once SUPLE_SPEED_PLUGIN_DIR . 'includes/class-cache.php';
         require_once SUPLE_SPEED_PLUGIN_DIR . 'includes/class-assets.php';
         require_once SUPLE_SPEED_PLUGIN_DIR . 'includes/class-fonts.php';
@@ -152,6 +154,7 @@ class SupleSpeed {
         $this->compat = new SupleSpeed\Compat();
         $this->elementor_guard = new SupleSpeed\ElementorGuard();
         $this->rules = new SupleSpeed\Rules();
+        $this->cdn = new SupleSpeed\CDN();
         $this->cache = new SupleSpeed\Cache();
         $this->assets = new SupleSpeed\Assets();
         $this->fonts = new SupleSpeed\Fonts();
@@ -439,7 +442,19 @@ class SupleSpeed {
             'elementor_compat' => true,
             'safe_mode' => false,
             'log_level' => 'info',
-            'multisite_network' => false
+            'multisite_network' => false,
+            'cdn_integrations' => [
+                'cloudflare' => [
+                    'enabled' => false,
+                    'api_token' => '',
+                    'zone_id' => '',
+                ],
+                'bunnycdn' => [
+                    'enabled' => false,
+                    'api_key' => '',
+                    'zone_id' => '',
+                ],
+            ],
         ];
         
         add_option('suple_speed_settings', $default_settings);

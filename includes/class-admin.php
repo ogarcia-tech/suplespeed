@@ -45,6 +45,7 @@ class Admin {
 
         // AJAX handlers
         add_action('wp_ajax_suple_speed_save_settings', [$this, 'ajax_save_settings']);
+        add_action('wp_ajax_suple_speed_save_cdn_settings', [$this, 'ajax_save_cdn_settings']);
         add_action('wp_ajax_suple_speed_reset_settings', [$this, 'ajax_reset_settings']);
         add_action('wp_ajax_suple_speed_export_settings', [$this, 'ajax_export_settings']);
         add_action('wp_ajax_suple_speed_import_settings', [$this, 'ajax_import_settings']);
@@ -229,6 +230,7 @@ class Admin {
      */
     public function sanitize_settings($input) {
         $sanitized = [];
+        $current_settings = get_option('suple_speed_settings', []);
         
         // Configuraciones booleanas
         $boolean_settings = [
@@ -305,6 +307,58 @@ class Admin {
             sanitize_textarea_field($input['images_critical_manual']) :
             '';
 
+        if (isset($input['cdn_integrations']) && is_array($input['cdn_integrations'])) {
+            $sanitized['cdn_integrations'] = $this->sanitize_cdn_settings($input['cdn_integrations']);
+        } else {
+            $sanitized['cdn_integrations'] = $current_settings['cdn_integrations'] ?? [];
+        }
+
+        return $sanitized;
+    }
+
+    /**
+     * Sanitizar configuraciones de CDN
+     */
+    private function sanitize_cdn_settings($input) {
+        $defaults = [
+            'cloudflare' => [
+                'enabled' => false,
+                'api_token' => '',
+                'zone_id' => '',
+            ],
+            'bunnycdn' => [
+                'enabled' => false,
+                'api_key' => '',
+                'zone_id' => '',
+            ],
+        ];
+
+        $sanitized = [];
+
+        foreach ($defaults as $provider => $provider_defaults) {
+            $provider_input = $input[$provider] ?? [];
+
+            if (!is_array($provider_input)) {
+                $provider_input = [];
+            }
+
+            $provider_settings = [
+                'enabled' => filter_var($provider_input['enabled'] ?? false, FILTER_VALIDATE_BOOLEAN),
+            ];
+
+            foreach ($provider_defaults as $field => $default_value) {
+                if ($field === 'enabled') {
+                    continue;
+                }
+
+                $value = $provider_input[$field] ?? '';
+                $provider_settings[$field] = $value === ''
+                    ? ''
+                    : sanitize_text_field($value);
+            }
+
+            $sanitized[$provider] = wp_parse_args($provider_settings, $provider_defaults);
+        }
 
         return $sanitized;
     }
@@ -687,7 +741,8 @@ class Admin {
         // Sanitizar y guardar
         $sanitized_settings = $this->sanitize_settings($settings);
         update_option('suple_speed_settings', $sanitized_settings);
-        
+        $this->settings = get_option('suple_speed_settings', []);
+
         // Log del cambio
         if ($this->logger) {
             $this->logger->info('Settings updated via AJAX', [
@@ -717,7 +772,9 @@ class Admin {
         if (function_exists('suple_speed')) {
             suple_speed()->reset_default_options();
         }
-        
+
+        $this->settings = get_option('suple_speed_settings', []);
+
         wp_send_json_success([
             'message' => __('Settings reset to defaults', 'suple-speed')
         ]);
@@ -784,6 +841,7 @@ class Admin {
         // Importar configuraciones
         $sanitized_settings = $this->sanitize_settings($import_data['settings']);
         update_option('suple_speed_settings', $sanitized_settings);
+        $this->settings = get_option('suple_speed_settings', []);
         
         // Importar reglas si existen
         if (isset($import_data['rules']) && is_array($import_data['rules'])) {
@@ -793,6 +851,43 @@ class Admin {
         wp_send_json_success([
             'message' => __('Settings imported successfully', 'suple-speed'),
             'imported_from_version' => $import_data['version'] ?? 'unknown'
+        ]);
+    }
+
+    /**
+     * AJAX: Guardar credenciales CDN
+     */
+    public function ajax_save_cdn_settings() {
+        check_ajax_referer('suple_speed_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_die('Unauthorized');
+        }
+
+        $cdn_settings = isset($_POST['cdn']) ? wp_unslash($_POST['cdn']) : [];
+        if (!is_array($cdn_settings)) {
+            $cdn_settings = [];
+        }
+
+        $sanitized_cdn = $this->sanitize_cdn_settings($cdn_settings);
+        $current_settings = get_option('suple_speed_settings', []);
+        $current_settings['cdn_integrations'] = $sanitized_cdn;
+
+        update_option('suple_speed_settings', $current_settings);
+        $this->settings = $current_settings;
+
+        if ($this->logger) {
+            $enabled_providers = array_keys(array_filter($sanitized_cdn, function($config) {
+                return !empty($config['enabled']);
+            }));
+
+            $this->logger->info('CDN settings updated', [
+                'enabled_providers' => $enabled_providers,
+            ], 'cdn');
+        }
+
+        wp_send_json_success([
+            'message' => __('CDN credentials saved successfully', 'suple-speed'),
         ]);
     }
 
