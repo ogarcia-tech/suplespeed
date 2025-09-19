@@ -728,6 +728,104 @@ class Admin {
      * Renderizar página de configuración
      */
     public function render_settings() {
+        $current_settings = $this->get_current_settings();
+        $dashboard_data   = $this->get_dashboard_data();
+        $server_caps      = $this->get_server_capabilities();
+
+        $cache_defaults = [
+            'total_files'          => 0,
+            'total_size'           => 0,
+            'total_size_formatted' => size_format(0),
+            'oldest_file'          => null,
+            'newest_file'          => null,
+        ];
+        $cache_stats = wp_parse_args($dashboard_data['cache_stats'] ?? [], $cache_defaults);
+        if (empty($cache_stats['total_size_formatted'])) {
+            $cache_stats['total_size_formatted'] = size_format((int) ($cache_stats['total_size'] ?? 0));
+        }
+
+        $database_defaults = [
+            'total_revisions'               => 0,
+            'expired_transients'            => 0,
+            'total_transients'              => 0,
+            'database_size'                 => 0,
+            'database_size_formatted'       => size_format(0),
+            'overhead'                      => 0,
+            'overhead_formatted'            => size_format(0),
+            'total_tables'                  => 0,
+            'tables_needing_optimization'   => 0,
+            'tables'                        => [],
+            'last_revision_cleanup'         => 0,
+            'last_revision_cleanup_human'   => null,
+            'last_transients_cleanup'       => 0,
+            'last_transients_cleanup_human' => null,
+            'last_optimization'             => 0,
+            'last_optimization_human'       => null,
+        ];
+        $database_stats = wp_parse_args($dashboard_data['database_stats'] ?? [], $database_defaults);
+
+        $compat_defaults = [
+            'detected_plugins'    => [],
+            'potential_conflicts' => [],
+            'recommendations'     => [],
+            'safe_mode_required'  => false,
+        ];
+        $compat_report = wp_parse_args($dashboard_data['compat_report'] ?? [], $compat_defaults);
+
+        $rules_module = function_exists('suple_speed') ? suple_speed()->rules : null;
+        $rules        = [];
+        $rules_stats  = [
+            'total_rules'   => 0,
+            'enabled_rules' => 0,
+            'global_rules'  => 0,
+            'url_rules'     => 0,
+            'rules_by_type' => [],
+        ];
+        if ($rules_module) {
+            if (method_exists($rules_module, 'get_all_rules')) {
+                $rules = $rules_module->get_all_rules();
+            }
+            if (method_exists($rules_module, 'get_rules_stats')) {
+                $rules_stats = $rules_module->get_rules_stats();
+            }
+        }
+
+        $logger_module = function_exists('suple_speed') ? suple_speed()->logger : null;
+        $log_stats     = [
+            'total'    => 0,
+            'by_level' => [],
+            'by_module'=> [],
+        ];
+        $recent_logs   = [];
+        if ($logger_module) {
+            if (method_exists($logger_module, 'get_log_stats')) {
+                $log_stats = $logger_module->get_log_stats();
+            }
+            if (method_exists($logger_module, 'get_logs')) {
+                $recent_logs = $logger_module->get_logs(20);
+            }
+        }
+
+        $cdn_defaults = [
+            'cloudflare' => [
+                'enabled'  => false,
+                'api_token'=> '',
+                'zone_id'  => '',
+            ],
+            'bunnycdn' => [
+                'enabled' => false,
+                'api_key' => '',
+                'zone_id' => '',
+            ],
+        ];
+        $cdn_settings   = isset($current_settings['cdn_integrations']) && is_array($current_settings['cdn_integrations'])
+            ? $current_settings['cdn_integrations']
+            : [];
+        $cloudflare_cdn = wp_parse_args($cdn_settings['cloudflare'] ?? [], $cdn_defaults['cloudflare']);
+        $cloudflare_cdn['enabled'] = !empty($cloudflare_cdn['enabled']);
+        $bunnycdn_cdn = wp_parse_args($cdn_settings['bunnycdn'] ?? [], $cdn_defaults['bunnycdn']);
+        $bunnycdn_cdn['enabled'] = !empty($bunnycdn_cdn['enabled']);
+
         include SUPLE_SPEED_PLUGIN_DIR . 'views/admin-settings.php';
     }
     
@@ -1154,16 +1252,16 @@ class Admin {
             }
         }
 
+        $settings_url = admin_url('admin.php?page=suple-speed-settings');
+        $critical_tab = $settings_url . '#tab-critical';
+
         if (!$this->critical_css_generator) {
             set_transient('suple_speed_critical_css_feedback', [
                 'type'    => 'error',
                 'message' => __('The Critical CSS generator service is unavailable.', 'suple-speed'),
             ], MINUTE_IN_SECONDS);
 
-            wp_safe_redirect(add_query_arg([
-                'page'    => 'suple-speed',
-                'section' => 'critical',
-            ], admin_url('admin.php')));
+            wp_safe_redirect($critical_tab);
             exit;
         }
 
@@ -1188,10 +1286,7 @@ class Admin {
             }
         }
 
-        wp_safe_redirect(add_query_arg([
-            'page'    => 'suple-speed',
-            'section' => 'critical',
-        ], admin_url('admin.php')));
+        wp_safe_redirect($critical_tab);
         exit;
     }
     
