@@ -33,15 +33,31 @@
             
             // Guardar configuración
             $(document).on('click', '.suple-save-settings', this.saveSettings);
+            $(document).on('click', '.suple-save-cdn-settings', this.saveCdnSettings);
             
             // Resetear configuración
             $(document).on('click', '.suple-reset-settings', this.resetSettings);
             
             // Exportar configuración
             $(document).on('click', '.suple-export-settings', this.exportSettings);
-            
+
             // Importar configuración
             $(document).on('change', '#suple-import-file', this.importSettings);
+
+            // Importar reglas
+            $(document).on('click', '.suple-import-rules', this.importRules);
+
+            // Limpiar caché LQIP
+            $(document).on('click', '.suple-images-clear-lqip', this.clearLqipCache);
+
+            // Exportar logs
+            $(document).on('click', '.suple-export-logs', this.exportLogs);
+
+            // Limpiar logs
+            $(document).on('click', '.suple-clear-logs', this.clearLogs);
+
+            // Probar calentamiento de caché
+            $(document).on('click', '.suple-test-cache', this.testCacheWarmup);
             
             // Aplicar sugerencias PSI
             $(document).on('click', '.suple-apply-suggestion', this.applySuggestion);
@@ -286,9 +302,21 @@
                 $button.text(originalText);
                 $button.prop('disabled', false);
                 SupleSpeedAdmin.showNotice('success', data.message);
-                
+
                 // Actualizar estadísticas si están visibles
                 SupleSpeedAdmin.updateCacheStats();
+
+                if (data.cdn_results) {
+                    const results = Array.isArray(data.cdn_results)
+                        ? data.cdn_results
+                        : Object.values(data.cdn_results);
+
+                    results.forEach(function(result) {
+                        if (!result || !result.message) return;
+
+                        SupleSpeedAdmin.showNotice(result.success ? 'success' : 'error', result.message);
+                    });
+                }
             }, function(error) {
                 $button.text(originalText);
                 $button.prop('disabled', false);
@@ -502,6 +530,42 @@
             });
         },
 
+        saveCdnSettings: function(e) {
+            e.preventDefault();
+
+            const $button = $(this);
+            const $form = $button.closest('form');
+            const originalText = $button.text();
+
+            const payload = {
+                cloudflare: {
+                    enabled: $form.find('[name="cdn_cloudflare_enabled"]').is(':checked'),
+                    api_token: ($form.find('[name="cdn_cloudflare_api_token"]').val() || '').trim(),
+                    zone_id: ($form.find('[name="cdn_cloudflare_zone_id"]').val() || '').trim()
+                },
+                bunnycdn: {
+                    enabled: $form.find('[name="cdn_bunnycdn_enabled"]').is(':checked'),
+                    api_key: ($form.find('[name="cdn_bunnycdn_api_key"]').val() || '').trim(),
+                    zone_id: ($form.find('[name="cdn_bunnycdn_zone_id"]').val() || '').trim()
+                }
+            };
+
+            $button.html('<span class="suple-spinner"></span> ' + supleSpeedAdmin.strings.processing);
+            $button.prop('disabled', true);
+
+            SupleSpeedAdmin.ajaxRequest('save_cdn_settings', {
+                cdn: payload
+            }, function(data) {
+                $button.text(originalText);
+                $button.prop('disabled', false);
+                SupleSpeedAdmin.showNotice('success', data.message || (supleSpeedAdmin.strings.success || 'Saved'));
+            }, function(error) {
+                $button.text(originalText);
+                $button.prop('disabled', false);
+                SupleSpeedAdmin.showNotice('error', error || supleSpeedAdmin.strings.error);
+            });
+        },
+
         resetSettings: function(e) {
             e.preventDefault();
             
@@ -554,7 +618,7 @@
         importSettings: function(e) {
             const file = e.target.files[0];
             if (!file) return;
-            
+
             const formData = new FormData();
             formData.append('action', 'suple_speed_import_settings');
             formData.append('nonce', supleSpeedAdmin.nonce);
@@ -584,9 +648,216 @@
             });
         },
 
+        importRules: function(e) {
+            e.preventDefault();
+
+            const $button = $(this);
+            const $fileInput = $('<input type="file" accept="application/json" style="display:none;">');
+
+            $('body').append($fileInput);
+
+            $fileInput.on('change', function() {
+                const file = this.files[0];
+
+                if (!file) {
+                    $fileInput.remove();
+                    return;
+                }
+
+                const originalHtml = $button.html();
+                $button.html('<span class="suple-spinner"></span> ' + supleSpeedAdmin.strings.processing);
+                $button.prop('disabled', true);
+
+                const formData = new FormData();
+                formData.append('action', 'suple_speed_import_rules');
+                formData.append('nonce', supleSpeedAdmin.nonce);
+                formData.append('rules_file', file);
+                formData.append('replace', $button.data('replace') ? '1' : '0');
+
+                $.ajax({
+                    url: supleSpeedAdmin.ajaxUrl,
+                    type: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    success: function(response) {
+                        $button.html(originalHtml);
+                        $button.prop('disabled', false);
+
+                        if (response && response.success) {
+                            const data = response.data || {};
+                            SupleSpeedAdmin.showNotice('success', data.message || supleSpeedAdmin.strings.success);
+
+                            if (data.reload) {
+                                setTimeout(function() {
+                                    window.location.reload();
+                                }, 1500);
+                            }
+                        } else {
+                            const message = response && response.data ? response.data : supleSpeedAdmin.strings.error;
+                            SupleSpeedAdmin.showNotice('error', message);
+                        }
+                    },
+                    error: function(xhr) {
+                        $button.html(originalHtml);
+                        $button.prop('disabled', false);
+
+                        let message = supleSpeedAdmin.strings.error;
+
+                        if (xhr && xhr.responseJSON && xhr.responseJSON.data) {
+                            message = xhr.responseJSON.data;
+                        }
+
+                        SupleSpeedAdmin.showNotice('error', message);
+                    },
+                    complete: function() {
+                        $fileInput.remove();
+                    }
+                });
+            });
+
+            $fileInput.trigger('click');
+        },
+
+        clearLqipCache: function(e) {
+            e.preventDefault();
+
+            const $button = $(this);
+            const originalHtml = $button.html();
+
+            $button.html('<span class="suple-spinner"></span> ' + supleSpeedAdmin.strings.processing);
+            $button.prop('disabled', true);
+
+            SupleSpeedAdmin.ajaxRequest('clear_lqip_cache', {}, function(data) {
+                $button.html(originalHtml);
+                $button.prop('disabled', false);
+
+                const message = data && data.message
+                    ? data.message
+                    : (supleSpeedAdmin.strings.success || 'Done');
+
+                SupleSpeedAdmin.showNotice('success', message);
+            }, function(error) {
+                $button.html(originalHtml);
+                $button.prop('disabled', false);
+                SupleSpeedAdmin.showNotice('error', error);
+            });
+        },
+
+        exportLogs: function(e) {
+            e.preventDefault();
+
+            const $button = $(this);
+            const originalHtml = $button.html();
+            const format = $button.data('format') || 'json';
+
+            $button.html('<span class="suple-spinner"></span> ' + supleSpeedAdmin.strings.processing);
+            $button.prop('disabled', true);
+
+            const payload = {
+                format: format,
+                level: $('#log-level-filter').val() || '',
+                module: $('#log-module-filter').val() || '',
+                days: $('#log-days-filter').val() || ''
+            };
+
+            SupleSpeedAdmin.ajaxRequest('export_logs', payload, function(data) {
+                $button.html(originalHtml);
+                $button.prop('disabled', false);
+
+                if (data && data.content && data.filename) {
+                    const blob = new Blob([data.content], { type: data.mime || 'application/json' });
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = url;
+                    a.download = data.filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                }
+
+                const message = data && data.message
+                    ? data.message
+                    : (supleSpeedAdmin.strings.success || 'Done');
+
+                SupleSpeedAdmin.showNotice('success', message);
+            }, function(error) {
+                $button.html(originalHtml);
+                $button.prop('disabled', false);
+                SupleSpeedAdmin.showNotice('error', error);
+            });
+        },
+
+        clearLogs: function(e) {
+            e.preventDefault();
+
+            if (!confirm(supleSpeedAdmin.strings.confirmClearLogs)) {
+                return;
+            }
+
+            const $button = $(this);
+            const originalHtml = $button.html();
+
+            $button.html('<span class="suple-spinner"></span> ' + supleSpeedAdmin.strings.processing);
+            $button.prop('disabled', true);
+
+            const payload = {
+                level: $('#log-level-filter').val() || '',
+                module: $('#log-module-filter').val() || '',
+                days: $('#log-days-filter').val() || ''
+            };
+
+            SupleSpeedAdmin.ajaxRequest('clear_logs', payload, function(data) {
+                $button.html(originalHtml);
+                $button.prop('disabled', false);
+
+                const message = data && data.message
+                    ? data.message
+                    : (supleSpeedAdmin.strings.success || 'Done');
+
+                SupleSpeedAdmin.showNotice('success', message);
+            }, function(error) {
+                $button.html(originalHtml);
+                $button.prop('disabled', false);
+                SupleSpeedAdmin.showNotice('error', error);
+            });
+        },
+
+        testCacheWarmup: function(e) {
+            e.preventDefault();
+
+            const $button = $(this);
+            const originalHtml = $button.html();
+            const url = $button.data('url') || supleSpeedAdmin.homeUrl || window.location.origin;
+
+            $button.html('<span class="suple-spinner"></span> ' + supleSpeedAdmin.strings.processing);
+            $button.prop('disabled', true);
+
+            SupleSpeedAdmin.ajaxRequest('test_cache_warmup', { url: url }, function(data) {
+                $button.html(originalHtml);
+                $button.prop('disabled', false);
+
+                let message = data && data.message
+                    ? data.message
+                    : (supleSpeedAdmin.strings.success || 'Done');
+
+                if (data && data.response_time) {
+                    message += ' (' + data.response_time + 's)';
+                }
+
+                SupleSpeedAdmin.showNotice('success', message);
+            }, function(error) {
+                $button.html(originalHtml);
+                $button.prop('disabled', false);
+                SupleSpeedAdmin.showNotice('error', error);
+            });
+        },
+
         applySuggestion: function(e) {
             e.preventDefault();
-            
+
             const $button = $(this);
             const suggestionId = $button.data('suggestion-id');
             const testId = $button.data('test-id');
@@ -1655,6 +1926,46 @@
                     SupleSpeedAdmin.showNotice('error', errorMessage);
                 });
             });
+
+            $(document).on('click', '.suple-onboarding-dismiss', function(e) {
+                e.preventDefault();
+
+                const $button = $(this);
+                if ($button.prop('disabled')) {
+                    return;
+                }
+
+                const $container = $button.closest('.suple-onboarding');
+                if ($container.length === 0) {
+                    return;
+                }
+
+                SupleSpeedAdmin.updateOnboardingDismissed($container, true);
+            });
+
+            $(document).on('click', '.suple-onboarding-reopen', function(e) {
+                e.preventDefault();
+
+                const $button = $(this);
+                if ($button.prop('disabled')) {
+                    return;
+                }
+
+                const $container = $button.closest('.suple-onboarding');
+                if ($container.length === 0) {
+                    return;
+                }
+
+                SupleSpeedAdmin.updateOnboardingDismissed($container, false);
+            });
+
+            $guide.each(function() {
+                const $container = $(this);
+                const dismissedAttr = $container.attr('data-dismissed');
+                const isDismissed = dismissedAttr === '1' || dismissedAttr === 1 || dismissedAttr === true;
+
+                SupleSpeedAdmin.applyOnboardingState($container, isDismissed);
+            });
         },
 
         updateOnboardingProgress: function($container, data) {
@@ -1701,6 +2012,65 @@
                     const successText = $status.data('success-text') || '';
                     $status.removeClass('warning').addClass('success').text(successText);
                 }
+            }
+
+            if (typeof data.dismissed !== 'undefined') {
+                const isDismissed = data.dismissed === true || data.dismissed === 1 || data.dismissed === '1';
+                SupleSpeedAdmin.applyOnboardingState($container, isDismissed);
+            }
+        },
+
+        updateOnboardingDismissed: function($container, dismissed) {
+            if (!$container || $container.length === 0) {
+                return;
+            }
+
+            const $buttons = $container.find('.suple-onboarding-dismiss, .suple-onboarding-reopen');
+            $buttons.prop('disabled', true);
+
+            SupleSpeedAdmin.ajaxRequest('update_onboarding', {
+                dismissed: dismissed ? 1 : 0
+            }, function(data) {
+                $buttons.prop('disabled', false);
+
+                if (data) {
+                    SupleSpeedAdmin.updateOnboardingProgress($container, data);
+                }
+            }, function(error) {
+                $buttons.prop('disabled', false);
+
+                const errorMessage = (error && error.message)
+                    ? error.message
+                    : (typeof error === 'string' && error)
+                        ? error
+                        : (supleSpeedAdmin.strings && supleSpeedAdmin.strings.error) || 'An error occurred';
+
+                SupleSpeedAdmin.showNotice('error', errorMessage);
+            });
+        },
+
+        applyOnboardingState: function($container, dismissed) {
+            if (!$container || $container.length === 0) {
+                return;
+            }
+
+            const isDismissed = dismissed === true || dismissed === 1 || dismissed === '1';
+            $container.toggleClass('is-dismissed', isDismissed);
+            $container.attr('data-dismissed', isDismissed ? '1' : '0');
+
+            const $body = $container.find('.suple-onboarding-body');
+            if ($body.length) {
+                $body.attr('aria-hidden', isDismissed ? 'true' : 'false');
+            }
+
+            const $dismissButton = $container.find('.suple-onboarding-dismiss');
+            if ($dismissButton.length) {
+                $dismissButton.attr('aria-expanded', isDismissed ? 'false' : 'true');
+            }
+
+            const $reopenButton = $container.find('.suple-onboarding-reopen');
+            if ($reopenButton.length) {
+                $reopenButton.attr('aria-expanded', isDismissed ? 'false' : 'true');
             }
         },
 

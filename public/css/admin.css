@@ -520,6 +520,98 @@
     display: block;
 }
 
+/* === ONBOARDING === */
+.suple-onboarding {
+    position: relative;
+}
+
+.suple-onboarding-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.suple-onboarding-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.suple-onboarding-progress-count {
+    font-weight: 600;
+    color: var(--suple-text-light);
+}
+
+.suple-onboarding-actions {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+}
+
+.suple-onboarding-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    font-size: 13px;
+    line-height: 1.4;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--suple-radius);
+    color: var(--suple-text-light);
+    cursor: pointer;
+}
+
+.suple-onboarding-toggle .dashicons {
+    font-size: 16px;
+    line-height: 1;
+}
+
+.suple-onboarding-toggle:hover,
+.suple-onboarding-toggle:focus {
+    color: var(--suple-text);
+    border-color: var(--suple-border);
+    background: var(--suple-bg-light);
+}
+
+.suple-onboarding-toggle:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 1px #ffffff, 0 0 0 3px rgba(19, 94, 150, 0.35);
+}
+
+.suple-onboarding-reopen {
+    display: none;
+}
+
+.suple-onboarding-collapsed-message {
+    display: none;
+    margin: 0 0 16px 0;
+    font-size: 13px;
+    color: var(--suple-text-light);
+}
+
+.suple-onboarding-body {
+    transition: opacity 0.2s ease;
+}
+
+.suple-onboarding.is-dismissed .suple-onboarding-body {
+    display: none;
+}
+
+.suple-onboarding.is-dismissed .suple-onboarding-collapsed-message {
+    display: block;
+}
+
+.suple-onboarding.is-dismissed .suple-onboarding-reopen {
+    display: inline-flex;
+}
+
+.suple-onboarding.is-dismissed .suple-onboarding-dismiss {
+    display: none;
+}
+
 /* === DASHBOARD ESPECÍFICO === */
 .suple-dashboard-welcome {
     background: linear-gradient(135deg, var(--suple-primary) 0%, var(--suple-primary-dark) 100%);
