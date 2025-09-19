@@ -12,6 +12,8 @@ class Images {
      */
     private $settings;
     private $logger;
+    private $critical_images_cache = null;
+    private $critical_image_index = null;
     
     /**
      * Soporte de formatos
@@ -105,11 +107,24 @@ class Images {
      * Añadir lazy loading a atributos de imagen
      */
     public function add_lazy_loading($attr, $attachment, $size) {
-        // Solo añadir si no está ya presente y no es una imagen crítica
-        if (!isset($attr['loading']) && !$this->is_critical_image($attachment, $attr)) {
+        $priority = $this->get_priority_for_attachment($attachment, $attr);
+
+        if ($priority) {
+            // Asegurar que no se aplique lazy loading y añadir fetchpriority
+            $attr['loading'] = 'eager';
+
+            if ($priority === 'high') {
+                $attr['fetchpriority'] = 'high';
+            }
+
+            return $attr;
+        }
+
+        // Solo añadir si no está ya presente
+        if (!isset($attr['loading'])) {
             $attr['loading'] = 'lazy';
         }
-        
+
         return $attr;
     }
     
@@ -117,11 +132,10 @@ class Images {
      * Añadir lazy loading al contenido
      */
     public function add_lazy_loading_to_content($content) {
-        // No procesar si ya tiene loading nativo de WordPress
-        if (strpos($content, 'loading=') !== false) {
+        if (empty($content)) {
             return $content;
         }
-        
+
         return preg_replace_callback(
             '/<img([^>]+)>/i',
             [$this, 'add_lazy_loading_to_img_tag'],
@@ -133,10 +147,10 @@ class Images {
      * Añadir lazy loading a thumbnails
      */
     public function add_lazy_loading_to_thumbnails($html) {
-        if (empty($html) || strpos($html, 'loading=') !== false) {
+        if (empty($html)) {
             return $html;
         }
-        
+
         return preg_replace_callback(
             '/<img([^>]+)>/i',
             [$this, 'add_lazy_loading_to_img_tag'],
@@ -150,71 +164,424 @@ class Images {
     private function add_lazy_loading_to_img_tag($matches) {
         $img_tag = $matches[0];
         $attributes = $matches[1];
-        
-        // Verificar si ya tiene loading
-        if (strpos($attributes, 'loading=') !== false) {
+        $entry = $this->get_priority_for_attribute_string($attributes);
+
+        $is_self_closing = substr(trim($img_tag), -2) === '/>';
+
+        if ($is_self_closing) {
+            $attributes = rtrim($attributes);
+            if (substr($attributes, -1) === '/') {
+                $attributes = rtrim(substr($attributes, 0, -1));
+            }
+        }
+
+        $closing = $is_self_closing ? ' />' : '>';
+
+        if ($entry) {
+            $attributes = $this->remove_attribute_from_string($attributes, 'loading');
+            $attributes = $this->set_attribute_in_string($attributes, 'loading', 'eager');
+
+            if (($entry['priority'] ?? '') === 'high') {
+                $attributes = $this->set_attribute_in_string($attributes, 'fetchpriority', 'high');
+            }
+
+            return '<img' . rtrim($attributes) . $closing;
+        }
+
+        if (stripos($attributes, 'loading=') !== false) {
             return $img_tag;
         }
-        
-        // Verificar si es imagen crítica
-        if ($this->is_critical_image_by_attributes($attributes)) {
-            return $img_tag;
-        }
-        
-        // Añadir loading="lazy"
-        $new_attributes = $attributes . ' loading="lazy"';
-        return '<img' . $new_attributes . '>';
+
+        $attributes .= ' loading="lazy"';
+
+        return '<img' . $attributes . $closing;
     }
     
     /**
      * Verificar si es imagen crítica
      */
-    private function is_critical_image($attachment_id, $attributes) {
-        // Imágenes above-the-fold (primeras en el contenido)
-        static $image_count = 0;
-        $image_count++;
-        
-        // Las primeras 2-3 imágenes se consideran críticas
-        if ($image_count <= 3) {
-            return true;
-        }
-        
-        // Verificar por clases CSS específicas
-        $critical_classes = ['hero', 'banner', 'logo', 'critical'];
-        if (isset($attributes['class'])) {
-            foreach ($critical_classes as $class) {
-                if (strpos($attributes['class'], $class) !== false) {
-                    return true;
-                }
-            }
-        }
-        
-        // Verificar por tamaño (imágenes grandes suelen ser críticas)
-        if (isset($attributes['width']) && $attributes['width'] > 800) {
-            return true;
-        }
-        
-        return false;
+    private function is_critical_image($attachment, $attributes) {
+        return (bool) $this->get_priority_for_attachment($attachment, $attributes);
     }
-    
+
     /**
      * Verificar si es imagen crítica por atributos
      */
     private function is_critical_image_by_attributes($attributes) {
-        // Buscar indicadores de imagen crítica
-        $critical_indicators = [
-            'class="[^"]*(?:hero|banner|logo|critical)',
-            'id="[^"]*(?:hero|banner|logo|critical)',
-            'data-[^=]*="[^"]*(?:hero|banner|critical)'
-        ];
-        
-        foreach ($critical_indicators as $pattern) {
-            if (preg_match('/' . $pattern . '/i', $attributes)) {
-                return true;
+        return (bool) $this->get_priority_for_attribute_string($attributes);
+    }
+
+    private function get_priority_for_attachment($attachment, $attributes) {
+        $entry = $this->locate_critical_image_entry(
+            $this->resolve_attachment_id($attachment),
+            $this->extract_sources_from_array($attributes)
+        );
+
+        return $entry['priority'] ?? null;
+    }
+
+    private function get_priority_for_attribute_string($attributes) {
+        $attribute_array = $this->parse_attribute_string($attributes);
+        $entry = $this->locate_critical_image_entry(
+            $this->extract_attachment_id_from_attributes($attribute_array),
+            $this->extract_sources_from_array($attribute_array)
+        );
+
+        return $entry;
+    }
+
+    private function locate_critical_image_entry($attachment_id, array $sources = []) {
+        $this->ensure_critical_images_index();
+
+        if ($attachment_id && isset($this->critical_image_index['ids'][$attachment_id])) {
+            return $this->critical_image_index['ids'][$attachment_id];
+        }
+
+        foreach ($sources as $source) {
+            $normalized = $this->normalize_image_url($source);
+            if ($normalized && isset($this->critical_image_index['urls'][$normalized])) {
+                return $this->critical_image_index['urls'][$normalized];
             }
         }
-        
-        return false;
+
+        return null;
+    }
+
+    private function resolve_attachment_id($attachment) {
+        if (is_numeric($attachment)) {
+            return (int) $attachment;
+        }
+
+        if (is_object($attachment) && isset($attachment->ID)) {
+            return (int) $attachment->ID;
+        }
+
+        return 0;
+    }
+
+    private function extract_sources_from_array($attributes) {
+        if (!is_array($attributes)) {
+            return [];
+        }
+
+        $sources = [];
+
+        foreach (['src', 'data-src', 'data-lazy-src', 'data-original', 'data-srcset', 'data-image', 'data-large_image', 'data-large-image'] as $key) {
+            if (!empty($attributes[$key])) {
+                $sources[] = $attributes[$key];
+            }
+        }
+
+        if (!empty($attributes['srcset'])) {
+            foreach (explode(',', $attributes['srcset']) as $srcset_item) {
+                $parts = preg_split('/\s+/', trim($srcset_item));
+                if (!empty($parts[0])) {
+                    $sources[] = $parts[0];
+                }
+            }
+        }
+
+        return $sources;
+    }
+
+    private function parse_attribute_string($attributes) {
+        $parsed = [];
+
+        if (preg_match_all("/([a-zA-Z0-9_:\\-]+)\s*=\s*(\"|')(.*?)\\2/", $attributes, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $match) {
+                $parsed[strtolower($match[1])] = html_entity_decode($match[3], ENT_QUOTES);
+            }
+        }
+
+        return $parsed;
+    }
+
+    private function extract_attachment_id_from_attributes(array $attributes) {
+        $candidates = ['data-id', 'data-image-id', 'data-attachment-id', 'data-elementor-id'];
+
+        foreach ($candidates as $candidate) {
+            if (!empty($attributes[$candidate]) && is_numeric($attributes[$candidate])) {
+                return (int) $attributes[$candidate];
+            }
+        }
+
+        if (!empty($attributes['class']) && preg_match('/wp-image-(\d+)/', $attributes['class'], $match)) {
+            return (int) $match[1];
+        }
+
+        if (!empty($attributes['id']) && preg_match('/(\d+)/', $attributes['id'], $match)) {
+            return (int) $match[1];
+        }
+
+        return 0;
+    }
+
+    private function remove_attribute_from_string($attributes, $attribute) {
+        return preg_replace("/\s+" . preg_quote($attribute, "/") . "\s*=\s*(\"|')[^\"']*\\1/i", '', $attributes);
+    }
+
+    private function set_attribute_in_string($attributes, $attribute, $value) {
+        $pattern = "/(" . preg_quote($attribute, "/") . "\s*=\s*)(\"|')[^\"']*\\2/i";
+        $replacement = '$1$2' . esc_attr($value) . '$2';
+
+        if (preg_match($pattern, $attributes)) {
+            return preg_replace($pattern, $replacement, $attributes, 1);
+        }
+
+        return rtrim($attributes) . ' ' . $attribute . '="' . esc_attr($value) . '"';
+    }
+
+    private function normalize_image_url($url) {
+        if (empty($url) || !is_string($url)) {
+            return '';
+        }
+
+        $url = trim($url);
+        $parsed = wp_parse_url($url);
+
+        if (!$parsed) {
+            return $url;
+        }
+
+        $normalized = ($parsed['host'] ?? '') . ($parsed['path'] ?? '');
+
+        if (!empty($parsed['query'])) {
+            $normalized .= '?' . $parsed['query'];
+        }
+
+        return strtolower($normalized);
+    }
+
+    private function ensure_critical_images_index() {
+        if ($this->critical_image_index === null) {
+            $this->get_critical_images();
+        }
+    }
+
+    private function build_critical_image_index(array $images) {
+        $index = [
+            'ids' => [],
+            'urls' => []
+        ];
+
+        foreach ($images as $image) {
+            if (!empty($image['id'])) {
+                $index['ids'][(int) $image['id']] = $image;
+            }
+
+            if (!empty($image['url'])) {
+                $normalized = $this->normalize_image_url($image['url']);
+                if ($normalized) {
+                    $index['urls'][$normalized] = $image;
+                }
+            }
+        }
+
+        return $index;
+    }
+
+    private function get_manual_critical_images() {
+        $entries = [];
+        $manual = $this->settings['images_critical_manual'] ?? '';
+
+        if (empty($manual)) {
+            return $entries;
+        }
+
+        if (is_array($manual)) {
+            $manual = implode("\n", $manual);
+        }
+
+        $lines = preg_split('/[\r\n]+/', $manual);
+
+        foreach ($lines as $line) {
+            $line = trim($line);
+
+            if ($line === '') {
+                continue;
+            }
+
+            if (preg_match('/wp-image-(\d+)/', $line, $match)) {
+                $line = $match[1];
+            }
+
+            if (is_numeric($line)) {
+                $id = (int) $line;
+                $image = wp_get_attachment_image_src($id, 'full');
+                if ($image) {
+                    $entries[] = [
+                        'id' => $id,
+                        'url' => $image[0],
+                        'width' => $image[1] ?? null,
+                        'height' => $image[2] ?? null,
+                        'priority' => 'high',
+                        'manual' => true
+                    ];
+                }
+
+                continue;
+            }
+
+            if (filter_var($line, FILTER_VALIDATE_URL)) {
+                $entries[] = [
+                    'url' => $line,
+                    'priority' => 'high',
+                    'manual' => true
+                ];
+
+                continue;
+            }
+
+            $uploads = wp_get_upload_dir();
+            if (!empty($uploads['baseurl'])) {
+                $possible_url = trailingslashit($uploads['baseurl']) . ltrim($line, '/');
+
+                $entries[] = [
+                    'url' => $possible_url,
+                    'priority' => 'high',
+                    'manual' => true
+                ];
+            }
+        }
+
+        return $entries;
+    }
+
+    private function detect_elementor_primary_image($post_id) {
+        $data = get_post_meta($post_id, '_elementor_data', true);
+
+        if (empty($data)) {
+            return null;
+        }
+
+        $decoded = is_string($data) ? json_decode($data, true) : $data;
+
+        if (!is_array($decoded)) {
+            return null;
+        }
+
+        $node = $this->find_first_elementor_image($decoded);
+
+        if (!$node) {
+            return null;
+        }
+
+        $image_settings = $node['settings']['image'] ?? [];
+        $id = isset($image_settings['id']) ? (int) $image_settings['id'] : 0;
+        $url = $image_settings['url'] ?? '';
+
+        if ($id && empty($url)) {
+            $image = wp_get_attachment_image_src($id, 'full');
+            if ($image) {
+                $url = $image[0];
+            }
+        }
+
+        if (empty($url) && isset($node['settings']['image_url'])) {
+            $url = $node['settings']['image_url'];
+        }
+
+        if (empty($url)) {
+            return null;
+        }
+
+        $entry = [
+            'url' => $url,
+            'priority' => 'high',
+            'context' => 'elementor'
+        ];
+
+        if ($id) {
+            $entry['id'] = $id;
+        }
+
+        return $entry;
+    }
+
+    private function find_first_elementor_image(array $nodes) {
+        foreach ($nodes as $node) {
+            if (!is_array($node)) {
+                continue;
+            }
+
+            if (($node['elType'] ?? '') === 'widget' && ($node['widgetType'] ?? '') === 'image') {
+                if (!empty($node['settings']['image']['url']) || !empty($node['settings']['image']['id'])) {
+                    return $node;
+                }
+            }
+
+            if (!empty($node['elements']) && is_array($node['elements'])) {
+                $found = $this->find_first_elementor_image($node['elements']);
+                if ($found) {
+                    return $found;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function detect_content_primary_image($post_id) {
+        $post = get_post($post_id);
+
+        if (!$post) {
+            return null;
+        }
+
+        $content = $post->post_content;
+
+        if (empty($content)) {
+            return null;
+        }
+
+        if (!preg_match_all('/<img[^>]+>/i', $content, $matches)) {
+            return null;
+        }
+
+        foreach ($matches[0] as $img_html) {
+            $attributes = $this->parse_attribute_string($img_html);
+            $width = isset($attributes['width']) ? (int) $attributes['width'] : 0;
+            $classes = $attributes['class'] ?? '';
+
+            $is_large = $width >= 640 || strpos($classes, 'size-full') !== false || strpos($classes, 'wp-image') !== false;
+
+            if (!$is_large && !empty($attributes['srcset'])) {
+                $is_large = true;
+            }
+
+            if (!$is_large) {
+                continue;
+            }
+
+            $id = $this->extract_attachment_id_from_attributes($attributes);
+            $sources = $this->extract_sources_from_array($attributes);
+            $url = reset($sources);
+
+            if ($id) {
+                $full = wp_get_attachment_image_src($id, 'full');
+                if ($full) {
+                    $url = $full[0];
+                }
+            }
+
+            if (!$url) {
+                continue;
+            }
+
+            $entry = [
+                'url' => $url,
+                'priority' => 'high',
+                'context' => 'content-image'
+            ];
+
+            if ($id) {
+                $entry['id'] = $id;
+            }
+
+            return $entry;
+        }
+
+        return null;
     }
     
     /**
@@ -659,15 +1026,19 @@ class Images {
         
         foreach ($critical_images as $image) {
             echo '<link rel="preload" as="image" href="' . esc_attr($image['url']) . '"';
-            
+
             if (isset($image['type'])) {
                 echo ' type="' . esc_attr($image['type']) . '"';
             }
-            
+
             if (isset($image['media'])) {
                 echo ' media="' . esc_attr($image['media']) . '"';
             }
-            
+
+            if (($image['priority'] ?? '') === 'high') {
+                echo ' fetchpriority="high"';
+            }
+
             echo '>' . "\n";
         }
     }
@@ -676,26 +1047,127 @@ class Images {
      * Obtener imágenes críticas para preload
      */
     private function get_critical_images() {
-        $critical_images = [];
-        
-        // Imágenes configuradas manualmente
-        $manual_preloads = $this->settings['images_preload'] ?? [];
-        
-        foreach ($manual_preloads as $preload) {
-            $critical_images[] = [
-                'url' => $preload['url'],
-                'type' => $preload['type'] ?? null,
-                'media' => $preload['media'] ?? null
-            ];
+        if ($this->critical_images_cache !== null) {
+            return $this->critical_images_cache;
         }
-        
-        // Auto-detectar imágenes críticas
-        // TODO: Implementar detección automática basada en:
-        // - Featured image de la página actual
-        // - Logo del sitio
-        // - Imagen hero detectada en el contenido
-        
-        return $critical_images;
+
+        $images = [];
+        $add_image = function(array $image) use (&$images) {
+            $image = array_filter($image, function($value) {
+                return $value !== null && $value !== '';
+            });
+
+            if (empty($image['url']) && empty($image['id'])) {
+                return;
+            }
+
+            $image['priority'] = $image['priority'] ?? 'high';
+
+            if (!empty($image['id'])) {
+                $key = 'id:' . intval($image['id']);
+            } else {
+                $key = 'url:' . $this->normalize_image_url($image['url']);
+            }
+
+            if (isset($images[$key])) {
+                // Mantener la prioridad más alta registrada
+                if (($image['priority'] ?? '') === 'high') {
+                    $images[$key]['priority'] = 'high';
+                }
+
+                return;
+            }
+
+            if (!isset($image['type']) && !empty($image['id'])) {
+                $mime = get_post_mime_type($image['id']);
+                if ($mime) {
+                    $image['type'] = $mime;
+                }
+            }
+
+            $images[$key] = $image;
+        };
+
+        // Imágenes configuradas manualmente para preload
+        $manual_preloads = $this->settings['images_preload'] ?? [];
+        if (is_array($manual_preloads)) {
+            foreach ($manual_preloads as $preload) {
+                if (is_array($preload) && isset($preload['url'])) {
+                    $add_image([
+                        'url' => $preload['url'],
+                        'type' => $preload['type'] ?? null,
+                        'media' => $preload['media'] ?? null,
+                        'priority' => $preload['priority'] ?? 'high',
+                        'manual' => true
+                    ]);
+                } elseif (is_string($preload)) {
+                    $add_image([
+                        'url' => $preload,
+                        'priority' => 'high',
+                        'manual' => true
+                    ]);
+                }
+            }
+        }
+
+        // Imágenes críticas marcadas manualmente
+        foreach ($this->get_manual_critical_images() as $manual_image) {
+            $add_image($manual_image);
+        }
+
+        // Logo principal del sitio
+        $logo_id = get_theme_mod('custom_logo');
+        if ($logo_id) {
+            $logo_image = wp_get_attachment_image_src($logo_id, 'full');
+            if ($logo_image) {
+                $add_image([
+                    'id' => $logo_id,
+                    'url' => $logo_image[0],
+                    'width' => $logo_image[1] ?? null,
+                    'height' => $logo_image[2] ?? null,
+                    'context' => 'site-logo',
+                    'priority' => 'high'
+                ]);
+            }
+        }
+
+        // Featured image de la entrada/página actual
+        if (is_singular()) {
+            $post_id = get_queried_object_id();
+            if ($post_id) {
+                $featured_id = get_post_thumbnail_id($post_id);
+                if ($featured_id) {
+                    $featured_image = wp_get_attachment_image_src($featured_id, 'full');
+                    if ($featured_image) {
+                        $add_image([
+                            'id' => $featured_id,
+                            'url' => $featured_image[0],
+                            'width' => $featured_image[1] ?? null,
+                            'height' => $featured_image[2] ?? null,
+                            'context' => 'featured-image',
+                            'priority' => 'high'
+                        ]);
+                    }
+                }
+
+                // Imagen hero detectada en Elementor
+                $elementor_image = $this->detect_elementor_primary_image($post_id);
+                if ($elementor_image) {
+                    $add_image($elementor_image);
+                }
+
+                // Primer imagen grande en el contenido
+                $content_image = $this->detect_content_primary_image($post_id);
+                if ($content_image) {
+                    $add_image($content_image);
+                }
+            }
+        }
+
+        $this->critical_images_cache = array_values($images);
+        $this->critical_image_index = $this->build_critical_image_index($this->critical_images_cache);
+
+        return $this->critical_images_cache;
     }
     
     /**
