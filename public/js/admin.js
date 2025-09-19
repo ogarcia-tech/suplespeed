@@ -1460,6 +1460,46 @@
                     SupleSpeedAdmin.showNotice('error', errorMessage);
                 });
             });
+
+            $(document).on('click', '.suple-onboarding-dismiss', function(e) {
+                e.preventDefault();
+
+                const $button = $(this);
+                if ($button.prop('disabled')) {
+                    return;
+                }
+
+                const $container = $button.closest('.suple-onboarding');
+                if ($container.length === 0) {
+                    return;
+                }
+
+                SupleSpeedAdmin.updateOnboardingDismissed($container, true);
+            });
+
+            $(document).on('click', '.suple-onboarding-reopen', function(e) {
+                e.preventDefault();
+
+                const $button = $(this);
+                if ($button.prop('disabled')) {
+                    return;
+                }
+
+                const $container = $button.closest('.suple-onboarding');
+                if ($container.length === 0) {
+                    return;
+                }
+
+                SupleSpeedAdmin.updateOnboardingDismissed($container, false);
+            });
+
+            $guide.each(function() {
+                const $container = $(this);
+                const dismissedAttr = $container.attr('data-dismissed');
+                const isDismissed = dismissedAttr === '1' || dismissedAttr === 1 || dismissedAttr === true;
+
+                SupleSpeedAdmin.applyOnboardingState($container, isDismissed);
+            });
         },
 
         updateOnboardingProgress: function($container, data) {
@@ -1506,6 +1546,65 @@
                     const successText = $status.data('success-text') || '';
                     $status.removeClass('warning').addClass('success').text(successText);
                 }
+            }
+
+            if (typeof data.dismissed !== 'undefined') {
+                const isDismissed = data.dismissed === true || data.dismissed === 1 || data.dismissed === '1';
+                SupleSpeedAdmin.applyOnboardingState($container, isDismissed);
+            }
+        },
+
+        updateOnboardingDismissed: function($container, dismissed) {
+            if (!$container || $container.length === 0) {
+                return;
+            }
+
+            const $buttons = $container.find('.suple-onboarding-dismiss, .suple-onboarding-reopen');
+            $buttons.prop('disabled', true);
+
+            SupleSpeedAdmin.ajaxRequest('update_onboarding', {
+                dismissed: dismissed ? 1 : 0
+            }, function(data) {
+                $buttons.prop('disabled', false);
+
+                if (data) {
+                    SupleSpeedAdmin.updateOnboardingProgress($container, data);
+                }
+            }, function(error) {
+                $buttons.prop('disabled', false);
+
+                const errorMessage = (error && error.message)
+                    ? error.message
+                    : (typeof error === 'string' && error)
+                        ? error
+                        : (supleSpeedAdmin.strings && supleSpeedAdmin.strings.error) || 'An error occurred';
+
+                SupleSpeedAdmin.showNotice('error', errorMessage);
+            });
+        },
+
+        applyOnboardingState: function($container, dismissed) {
+            if (!$container || $container.length === 0) {
+                return;
+            }
+
+            const isDismissed = dismissed === true || dismissed === 1 || dismissed === '1';
+            $container.toggleClass('is-dismissed', isDismissed);
+            $container.attr('data-dismissed', isDismissed ? '1' : '0');
+
+            const $body = $container.find('.suple-onboarding-body');
+            if ($body.length) {
+                $body.attr('aria-hidden', isDismissed ? 'true' : 'false');
+            }
+
+            const $dismissButton = $container.find('.suple-onboarding-dismiss');
+            if ($dismissButton.length) {
+                $dismissButton.attr('aria-expanded', isDismissed ? 'false' : 'true');
+            }
+
+            const $reopenButton = $container.find('.suple-onboarding-reopen');
+            if ($reopenButton.length) {
+                $reopenButton.attr('aria-expanded', isDismissed ? 'false' : 'true');
             }
         },
 

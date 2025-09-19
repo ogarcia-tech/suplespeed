@@ -807,15 +807,17 @@ class Admin {
             wp_send_json_error(__('Unauthorized', 'suple-speed'));
         }
 
-        $step_key = sanitize_key($_POST['step'] ?? '');
+        $step_key = isset($_POST['step']) ? sanitize_key($_POST['step']) : '';
         $completed = isset($_POST['completed'])
             ? filter_var($_POST['completed'], FILTER_VALIDATE_BOOLEAN)
             : false;
+        $dismissed = array_key_exists('dismissed', $_POST)
+            ? filter_var($_POST['dismissed'], FILTER_VALIDATE_BOOLEAN)
+            : null;
 
         $steps = $this->get_onboarding_steps();
-
-        if (empty($step_key) || !isset($steps[$step_key])) {
-            wp_send_json_error(__('Invalid onboarding step', 'suple-speed'));
+        if (!is_array($steps)) {
+            $steps = [];
         }
 
         $state = get_option('suple_speed_onboarding', []);
@@ -823,10 +825,34 @@ class Admin {
             $state = [];
         }
 
-        if ($completed) {
-            $state[$step_key] = true;
-        } else {
-            unset($state[$step_key]);
+        $state_changed = false;
+
+        if ($step_key !== '') {
+            if (!isset($steps[$step_key])) {
+                wp_send_json_error(__('Invalid onboarding step', 'suple-speed'));
+            }
+
+            if ($completed) {
+                $state[$step_key] = true;
+            } else {
+                unset($state[$step_key]);
+            }
+
+            $state_changed = true;
+        }
+
+        if ($dismissed !== null) {
+            if ($dismissed) {
+                $state['dismissed'] = true;
+            } else {
+                unset($state['dismissed']);
+            }
+
+            $state_changed = true;
+        }
+
+        if (!$state_changed) {
+            wp_send_json_error(__('Invalid onboarding request', 'suple-speed'));
         }
 
         update_option('suple_speed_onboarding', $state);
@@ -856,6 +882,7 @@ class Admin {
             'progress' => $progress,
             'remaining_critical' => array_keys($remaining_critical),
             'remaining_labels' => array_values($remaining_labels),
+            'dismissed' => !empty($state['dismissed']),
 
         ]);
     }
