@@ -305,12 +305,26 @@ $current_settings = $this->get_current_settings();
                         </div>
                     </div>
 
+                    <!-- Font Display Swap -->
+                    <div class="suple-form-row">
+                        <div class="suple-form-toggle">
+                            <div class="suple-toggle">
+                                <input type="checkbox" id="fonts_display_swap" name="fonts_display_swap" <?php checked($current_settings['fonts_display_swap'] ?? true); ?>>
+                                <span class="suple-toggle-slider"></span>
+                            </div>
+                            <label for="fonts_display_swap" class="suple-form-label"><?php _e('Add font-display: swap to local fonts', 'suple-speed'); ?></label>
+                        </div>
+                        <div class="suple-form-help">
+                            <?php _e('Automatically append font-display: swap to @font-face rules that serve fonts from your domain. Disable if this conflicts with custom styling.', 'suple-speed'); ?>
+                        </div>
+                    </div>
+
                     <!-- Font Display -->
                     <div class="suple-form-row">
                         <div class="suple-notice info">
                             <p>
                                 <strong><?php _e('Font Display Optimization', 'suple-speed'); ?></strong><br>
-                                <?php _e('Suple Speed automatically adds font-display: swap to all fonts for better loading performance.', 'suple-speed'); ?>
+                                <?php _e('Ensures text stays visible while local webfonts load by leveraging the font-display property.', 'suple-speed'); ?>
                             </p>
                         </div>
                     </div>
