@@ -13,46 +13,6 @@ $nav_items = [
         'title' => __('Dashboard', 'suple-speed'),
         'icon' => 'dashicons-dashboard'
     ],
-    'suple-speed-performance' => [
-        'title' => __('Performance', 'suple-speed'), 
-        'icon' => 'dashicons-performance'
-    ],
-    'suple-speed-cache' => [
-        'title' => __('Cache', 'suple-speed'),
-        'icon' => 'dashicons-update'
-    ],
-    'suple-speed-assets' => [
-        'title' => __('Assets', 'suple-speed'),
-        'icon' => 'dashicons-media-code'
-    ],
-    'suple-speed-critical' => [
-        'title' => __('Critical & Preloads', 'suple-speed'),
-        'icon' => 'dashicons-star-filled'
-    ],
-    'suple-speed-fonts' => [
-        'title' => __('Fonts', 'suple-speed'),
-        'icon' => 'dashicons-editor-textcolor'
-    ],
-    'suple-speed-images' => [
-        'title' => __('Images', 'suple-speed'),
-        'icon' => 'dashicons-format-image'
-    ],
-    'suple-speed-rules' => [
-        'title' => __('Rules', 'suple-speed'),
-        'icon' => 'dashicons-admin-settings'
-    ],
-    'suple-speed-compatibility' => [
-        'title' => __('Compatibility', 'suple-speed'),
-        'icon' => 'dashicons-yes-alt'
-    ],
-    'suple-speed-tools' => [
-        'title' => __('Tools', 'suple-speed'),
-        'icon' => 'dashicons-admin-tools'
-    ],
-    'suple-speed-logs' => [
-        'title' => __('Logs', 'suple-speed'),
-        'icon' => 'dashicons-list-view'
-    ],
     'suple-speed-settings' => [
         'title' => __('Settings', 'suple-speed'),
         'icon' => 'dashicons-admin-generic'
