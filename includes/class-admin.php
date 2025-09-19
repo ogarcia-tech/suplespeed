@@ -39,6 +39,7 @@ class Admin {
     private function init_hooks() {
         add_action('admin_menu', [$this, 'add_admin_menu']);
         add_action('admin_init', [$this, 'register_settings']);
+        add_action('admin_init', [$this, 'handle_legacy_page_redirects'], 1);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_scripts']);
         add_action('admin_notices', [$this, 'show_admin_notices']);
 
@@ -47,7 +48,9 @@ class Admin {
         add_action('wp_ajax_suple_speed_reset_settings', [$this, 'ajax_reset_settings']);
         add_action('wp_ajax_suple_speed_export_settings', [$this, 'ajax_export_settings']);
         add_action('wp_ajax_suple_speed_import_settings', [$this, 'ajax_import_settings']);
+
         add_action('wp_ajax_suple_speed_update_onboarding', [$this, 'ajax_update_onboarding']);
+
         
         // Plugin action links
         add_filter('plugin_action_links_' . SUPLE_SPEED_PLUGIN_BASENAME, [$this, 'add_action_links']);
@@ -80,107 +83,7 @@ class Admin {
             'suple-speed',
             [$this, 'render_dashboard']
         );
-        
-        // Rendimiento (PageSpeed Insights)
-        $this->admin_pages['performance'] = add_submenu_page(
-            'suple-speed',
-            __('Performance', 'suple-speed'),
-            __('Performance', 'suple-speed'),
-            'manage_options',
-            'suple-speed-performance',
-            [$this, 'render_performance']
-        );
-        
-        // Caché
-        $this->admin_pages['cache'] = add_submenu_page(
-            'suple-speed',
-            __('Cache', 'suple-speed'),
-            __('Cache', 'suple-speed'),
-            'manage_options',
-            'suple-speed-cache',
-            [$this, 'render_cache']
-        );
-        
-        // Assets (CSS/JS)
-        $this->admin_pages['assets'] = add_submenu_page(
-            'suple-speed',
-            __('Assets', 'suple-speed'),
-            __('Assets', 'suple-speed'),
-            'manage_options',
-            'suple-speed-assets',
-            [$this, 'render_assets']
-        );
-        
-        // Critical CSS & Preloads
-        $this->admin_pages['critical'] = add_submenu_page(
-            'suple-speed',
-            __('Critical & Preloads', 'suple-speed'),
-            __('Critical & Preloads', 'suple-speed'),
-            'manage_options',
-            'suple-speed-critical',
-            [$this, 'render_critical']
-        );
-        
-        // Fuentes
-        $this->admin_pages['fonts'] = add_submenu_page(
-            'suple-speed',
-            __('Fonts', 'suple-speed'),
-            __('Fonts', 'suple-speed'),
-            'manage_options',
-            'suple-speed-fonts',
-            [$this, 'render_fonts']
-        );
-        
-        // Imágenes
-        $this->admin_pages['images'] = add_submenu_page(
-            'suple-speed',
-            __('Images', 'suple-speed'),
-            __('Images', 'suple-speed'),
-            'manage_options',
-            'suple-speed-images',
-            [$this, 'render_images']
-        );
-        
-        // Reglas
-        $this->admin_pages['rules'] = add_submenu_page(
-            'suple-speed',
-            __('Rules', 'suple-speed'),
-            __('Rules', 'suple-speed'),
-            'manage_options',
-            'suple-speed-rules',
-            [$this, 'render_rules']
-        );
-        
-        // Compatibilidad
-        $this->admin_pages['compatibility'] = add_submenu_page(
-            'suple-speed',
-            __('Compatibility', 'suple-speed'),
-            __('Compatibility', 'suple-speed'),
-            'manage_options',
-            'suple-speed-compatibility',
-            [$this, 'render_compatibility']
-        );
-        
-        // Herramientas
-        $this->admin_pages['tools'] = add_submenu_page(
-            'suple-speed',
-            __('Tools', 'suple-speed'),
-            __('Tools', 'suple-speed'),
-            'manage_options',
-            'suple-speed-tools',
-            [$this, 'render_tools']
-        );
-        
-        // Logs
-        $this->admin_pages['logs'] = add_submenu_page(
-            'suple-speed',
-            __('Logs', 'suple-speed'),
-            __('Logs', 'suple-speed'),
-            'manage_options',
-            'suple-speed-logs',
-            [$this, 'render_logs']
-        );
-        
+
         // Configuración
         $this->admin_pages['settings'] = add_submenu_page(
             'suple-speed',
@@ -337,7 +240,9 @@ class Admin {
         ];
         
         foreach ($boolean_settings as $setting) {
-            $sanitized[$setting] = !empty($input[$setting]);
+            $sanitized[$setting] = array_key_exists($setting, $input)
+                ? filter_var($input[$setting], FILTER_VALIDATE_BOOLEAN)
+                : false;
         }
         
         // Configuraciones numéricas
@@ -424,11 +329,58 @@ class Admin {
             $version,
             true
         );
-        
+
+        $asset_groups = [];
+        $manual_overrides = [];
+        $bundle_status = ['css' => [], 'js' => []];
+
+        if (function_exists('suple_speed') && isset(suple_speed()->assets)) {
+            $assets_module = suple_speed()->assets;
+
+            if (method_exists($assets_module, 'get_asset_group_labels')) {
+                $asset_groups = $assets_module->get_asset_group_labels();
+            }
+
+            if (method_exists($assets_module, 'get_manual_groups')) {
+                $manual_overrides = $assets_module->get_manual_groups();
+            }
+
+            if (method_exists($assets_module, 'get_bundle_status')) {
+                $bundle_status = $assets_module->get_bundle_status();
+            }
+        }
+
         // Datos para JavaScript
         wp_localize_script('suple-speed-admin', 'supleSpeedAdmin', [
             'nonce' => wp_create_nonce('suple_speed_nonce'),
             'ajaxUrl' => admin_url('admin-ajax.php'),
+            'assetGroups' => $asset_groups,
+            'manualAssetGroups' => $manual_overrides,
+            'bundleStatus' => $bundle_status,
+            'labels' => [
+                'handle' => __('Handle', 'suple-speed'),
+                'type' => __('Type', 'suple-speed'),
+                'detectedGroup' => __('Detected group', 'suple-speed'),
+                'manualGroup' => __('Manual group', 'suple-speed'),
+                'source' => __('Source', 'suple-speed'),
+                'canMerge' => __('Can merge', 'suple-speed'),
+                'canDefer' => __('Can defer', 'suple-speed'),
+                'css' => __('CSS', 'suple-speed'),
+                'js' => __('JS', 'suple-speed'),
+                'manual' => __('Manual', 'suple-speed'),
+                'auto' => __('Automatic', 'suple-speed'),
+                'noHandles' => __('No handles available yet.', 'suple-speed'),
+                'noBundles' => __('No bundles have been generated yet. They will appear here after the next optimization run.', 'suple-speed'),
+                'bundlesType' => __('Type', 'suple-speed'),
+                'bundlesGroup' => __('Group', 'suple-speed'),
+                'bundlesIdentifier' => __('Identifier', 'suple-speed'),
+                'bundlesVersion' => __('Version', 'suple-speed'),
+                'bundlesGenerated' => __('Generated', 'suple-speed'),
+                'bundlesHandles' => __('Handles', 'suple-speed'),
+                'bundlesSize' => __('Size', 'suple-speed'),
+                'groupPrefix' => __('Group', 'suple-speed'),
+                'scanPlaceholder' => __('Run a scan to populate the detected handles list and review their current classification.', 'suple-speed')
+            ],
             'strings' => [
                 'confirmReset' => __('Are you sure you want to reset all settings?', 'suple-speed'),
                 'confirmPurge' => __('Are you sure you want to purge all cache?', 'suple-speed'),
@@ -537,78 +489,137 @@ class Admin {
     /**
      * Renderizar dashboard
      */
-    public function render_dashboard() {
+    public function render_dashboard($active_tab = null) {
+        if ($active_tab === null) {
+            $requested = isset($_GET['section']) ? sanitize_key(wp_unslash($_GET['section'])) : '';
+            if (empty($requested) && isset($_GET['tab'])) {
+                $requested = sanitize_key(wp_unslash($_GET['tab']));
+            }
+            $active_tab = $requested ?: 'overview';
+        }
+
+        if (empty($active_tab)) {
+            $active_tab = 'overview';
+        }
+
         include SUPLE_SPEED_PLUGIN_DIR . 'views/admin-dashboard.php';
     }
-    
+
     /**
      * Renderizar página de rendimiento
      */
     public function render_performance() {
-        include SUPLE_SPEED_PLUGIN_DIR . 'views/admin-performance.php';
+        $this->render_dashboard('performance');
     }
-    
+
     /**
      * Renderizar página de caché
      */
     public function render_cache() {
-        include SUPLE_SPEED_PLUGIN_DIR . 'views/admin-cache.php';
+        $this->render_dashboard('cache');
     }
-    
+
     /**
      * Renderizar página de assets
      */
     public function render_assets() {
-        include SUPLE_SPEED_PLUGIN_DIR . 'views/admin-assets.php';
+        $this->render_dashboard('assets');
     }
-    
+
     /**
      * Renderizar página de critical CSS
      */
     public function render_critical() {
-        include SUPLE_SPEED_PLUGIN_DIR . 'views/admin-critical.php';
+        $this->render_dashboard('critical');
     }
-    
+
     /**
      * Renderizar página de fuentes
      */
     public function render_fonts() {
-        include SUPLE_SPEED_PLUGIN_DIR . 'views/admin-fonts.php';
+        $this->render_dashboard('fonts');
     }
-    
+
     /**
      * Renderizar página de imágenes
      */
     public function render_images() {
-        include SUPLE_SPEED_PLUGIN_DIR . 'views/admin-images.php';
+        $this->render_dashboard('images');
     }
-    
+
     /**
      * Renderizar página de reglas
      */
     public function render_rules() {
-        include SUPLE_SPEED_PLUGIN_DIR . 'views/admin-rules.php';
+        $this->render_dashboard('rules');
     }
-    
+
     /**
      * Renderizar página de compatibilidad
      */
     public function render_compatibility() {
-        include SUPLE_SPEED_PLUGIN_DIR . 'views/admin-compatibility.php';
+        $this->render_dashboard('compatibility');
     }
-    
+
     /**
      * Renderizar página de herramientas
      */
     public function render_tools() {
-        include SUPLE_SPEED_PLUGIN_DIR . 'views/admin-tools.php';
+        $this->render_dashboard('tools');
     }
-    
+
     /**
      * Renderizar página de logs
      */
     public function render_logs() {
-        include SUPLE_SPEED_PLUGIN_DIR . 'views/admin-logs.php';
+        $this->render_dashboard('logs');
+    }
+
+    /**
+     * Redirigir páginas heredadas a la nueva vista tabulada
+     */
+    public function handle_legacy_page_redirects() {
+        if (!is_admin() || !isset($_GET['page'])) {
+            return;
+        }
+
+        $page = sanitize_key(wp_unslash($_GET['page']));
+
+        if ($page === 'suple-speed' || $page === 'suple-speed-settings') {
+            return;
+        }
+
+        $legacy_tabs = [
+            'suple-speed-performance' => 'performance',
+            'suple-speed-cache' => 'cache',
+            'suple-speed-assets' => 'assets',
+            'suple-speed-critical' => 'critical',
+            'suple-speed-fonts' => 'fonts',
+            'suple-speed-images' => 'images',
+            'suple-speed-rules' => 'rules',
+            'suple-speed-compatibility' => 'compatibility',
+            'suple-speed-tools' => 'tools',
+            'suple-speed-logs' => 'logs',
+        ];
+
+        if (!isset($legacy_tabs[$page])) {
+            return;
+        }
+
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+
+        $target = add_query_arg(
+            [
+                'page' => 'suple-speed',
+                'section' => $legacy_tabs[$page],
+            ],
+            admin_url('admin.php')
+        );
+
+        wp_safe_redirect($target);
+        exit;
     }
     
     /**
@@ -745,6 +756,7 @@ class Admin {
     }
 
     /**
+
      * AJAX: Guardar progreso del onboarding
      */
     public function ajax_update_onboarding() {
@@ -803,11 +815,12 @@ class Admin {
             'progress' => $progress,
             'remaining_critical' => array_keys($remaining_critical),
             'remaining_labels' => array_values($remaining_labels),
+
         ]);
     }
 
     // === UTILIDADES ===
-    
+
     /**
      * Obtener datos del dashboard
      */

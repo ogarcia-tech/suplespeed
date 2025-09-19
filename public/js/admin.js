@@ -12,6 +12,7 @@
             this.setupTabs();
             this.setupToggles();
             this.setupAjaxForms();
+            this.initializeAssetsUI();
         },
 
         bindEvents: function() {
@@ -50,6 +51,11 @@
             
             // Cargar logs
             $(document).on('click', '.suple-load-logs', this.loadLogs);
+
+            // Overrides manuales de assets
+            $(document).on('change', '.suple-handle-group-select', this.onManualGroupChange.bind(this));
+            $(document).on('click', '.suple-save-manual-groups', this.saveManualGroups.bind(this));
+            $(document).on('click', '.suple-regenerate-bundles', this.regenerateBundles.bind(this));
         },
 
         initComponents: function() {
@@ -614,56 +620,417 @@
         },
 
         displayHandlesResults: function(data) {
+            this.assetHandles = data || { css: {}, js: {} };
+
+            const $detected = $('#handles-detected');
+            if ($detected.length) {
+                let html = '';
+                const labels = supleSpeedAdmin.labels || {};
+                const groupPrefix = labels.groupPrefix || 'Group';
+                const self = this;
+
+                if (data && data.css && Object.keys(data.css).length > 0) {
+                    html += '<h4>' + (labels.css || 'CSS') + '</h4>';
+                    html += '<table class="suple-table">';
+                    html += '<thead><tr>' +
+                        '<th>' + (labels.handle || 'Handle') + '</th>' +
+                        '<th>' + (labels.detectedGroup || 'Detected') + '</th>' +
+                        '<th>' + (labels.source || 'Source') + '</th>' +
+                        '<th>' + (labels.canMerge || 'Can merge') + '</th>' +
+                        '</tr></thead>';
+                    html += '<tbody>';
+
+                    Object.keys(data.css).forEach(function(handle) {
+                        const css = data.css[handle];
+                        const badge = css.group ? self.escapeHtml(groupPrefix + ' ' + css.group) : '&mdash;';
+                        html += '<tr>' +
+                            '<td><code>' + self.escapeHtml(handle) + '</code></td>' +
+                            '<td><span class="suple-badge">' + badge + '</span></td>' +
+                            '<td><small>' + self.escapeHtml(css.src || 'N/A') + '</small></td>' +
+                            '<td>' + (css.can_merge ? '✅' : '❌') + '</td>' +
+                            '</tr>';
+                    });
+
+                    html += '</tbody></table>';
+                }
+
+                if (data && data.js && Object.keys(data.js).length > 0) {
+                    html += '<h4>' + (labels.js || 'JS') + '</h4>';
+                    html += '<table class="suple-table">';
+                    html += '<thead><tr>' +
+                        '<th>' + (labels.handle || 'Handle') + '</th>' +
+                        '<th>' + (labels.detectedGroup || 'Detected') + '</th>' +
+                        '<th>' + (labels.source || 'Source') + '</th>' +
+                        '<th>' + (labels.canMerge || 'Can merge') + '</th>' +
+                        '<th>' + (labels.canDefer || 'Can defer') + '</th>' +
+                        '</tr></thead>';
+                    html += '<tbody>';
+
+                    Object.keys(data.js).forEach(function(handle) {
+                        const js = data.js[handle];
+                        const badge = js.group ? self.escapeHtml(groupPrefix + ' ' + js.group) : '&mdash;';
+                        html += '<tr>' +
+                            '<td><code>' + self.escapeHtml(handle) + '</code></td>' +
+                            '<td><span class="suple-badge">' + badge + '</span></td>' +
+                            '<td><small>' + self.escapeHtml(js.src || 'N/A') + '</small></td>' +
+                            '<td>' + (js.can_merge ? '✅' : '❌') + '</td>' +
+                            '<td>' + (js.can_defer ? '✅' : '❌') + '</td>' +
+                            '</tr>';
+                    });
+
+                    html += '</tbody></table>';
+                }
+
+                if (!html) {
+                    html = '<p>' + (labels.scanPlaceholder || '') + '</p>';
+                }
+
+                $detected.html(html);
+            }
+
+            this.renderManualGroupsTable();
+        },
+
+        initializeAssetsUI: function() {
+            const hasAssetsUI = $('#handles-results').length > 0 || $('#bundle-status').length > 0;
+
+            if (!hasAssetsUI) {
+                return;
+            }
+
+            this.assetGroups = supleSpeedAdmin.assetGroups || {};
+            this.manualAssetGroups = $.extend({}, supleSpeedAdmin.manualAssetGroups || {});
+            this.bundleStatus = supleSpeedAdmin.bundleStatus || { css: {}, js: {} };
+            this.assetHandles = this.assetHandles || { css: {}, js: {} };
+            this.manualDirty = false;
+            this.needsRegeneration = false;
+
+            this.renderManualGroupsTable();
+            this.updateBundleStatus(this.bundleStatus);
+        },
+
+        renderManualGroupsTable: function() {
             const $container = $('#handles-results');
             if ($container.length === 0) return;
-            
-            let html = '<div class="suple-card">';
-            html += '<h3>Detected Assets</h3>';
-            
-            // CSS Handles
-            if (data.css && Object.keys(data.css).length > 0) {
-                html += '<h4>CSS Files</h4>';
-                html += '<table class="suple-table">';
-                html += '<thead><tr><th>Handle</th><th>Group</th><th>Source</th><th>Can Merge</th></tr></thead>';
-                html += '<tbody>';
-                
-                Object.keys(data.css).forEach(function(handle) {
-                    const css = data.css[handle];
-                    html += '<tr>';
-                    html += '<td><code>' + handle + '</code></td>';
-                    html += '<td><span class="suple-badge">Group ' + css.group + '</span></td>';
-                    html += '<td><small>' + (css.src || 'N/A') + '</small></td>';
-                    html += '<td>' + (css.can_merge ? '✅' : '❌') + '</td>';
-                    html += '</tr>';
-                });
-                
-                html += '</tbody></table>';
+
+            const labels = supleSpeedAdmin.labels || {};
+            const assetGroups = this.assetGroups || {};
+            const handlesData = this.assetHandles || { css: {}, js: {} };
+            const manualGroups = this.manualAssetGroups || {};
+            const rows = {};
+            const self = this;
+            const groupPrefix = labels.groupPrefix || 'Group';
+
+            const addRow = function(handle, typeLabel, data) {
+                const normalized = (handle || '').toString();
+                const key = normalized.toLowerCase();
+                const existing = rows[key] || {
+                    handle: normalized,
+                    type: typeLabel,
+                    detectedGroup: '',
+                    source: '',
+                    canMerge: null,
+                    canDefer: null
+                };
+
+                if (data && typeof data.group !== 'undefined' && data.group) {
+                    existing.detectedGroup = data.group;
+                }
+
+                if (data && typeof data.src !== 'undefined') {
+                    existing.source = data.src || '';
+                }
+
+                if (data && typeof data.can_merge !== 'undefined') {
+                    existing.canMerge = data.can_merge;
+                }
+
+                if (data && typeof data.can_defer !== 'undefined') {
+                    existing.canDefer = data.can_defer;
+                }
+
+                existing.type = typeLabel;
+                rows[key] = existing;
+            };
+
+            Object.keys(handlesData.css || {}).forEach(function(handle) {
+                addRow(handle, labels.css || 'CSS', handlesData.css[handle]);
+            });
+
+            Object.keys(handlesData.js || {}).forEach(function(handle) {
+                addRow(handle, labels.js || 'JS', handlesData.js[handle]);
+            });
+
+            Object.keys(manualGroups).forEach(function(handle) {
+                if (!rows[handle]) {
+                    rows[handle] = {
+                        handle: handle,
+                        type: labels.manual || 'Manual',
+                        detectedGroup: '',
+                        source: '',
+                        canMerge: null,
+                        canDefer: null
+                    };
+                } else {
+                    rows[handle].type = rows[handle].type || labels.manual || 'Manual';
+                }
+            });
+
+            const keys = Object.keys(rows);
+
+            if (keys.length === 0) {
+                $container.html('<p>' + (labels.noHandles || '') + '</p>');
+                return;
             }
-            
-            // JS Handles
-            if (data.js && Object.keys(data.js).length > 0) {
-                html += '<h4>JavaScript Files</h4>';
-                html += '<table class="suple-table">';
-                html += '<thead><tr><th>Handle</th><th>Group</th><th>Source</th><th>Can Merge</th><th>Can Defer</th></tr></thead>';
-                html += '<tbody>';
-                
-                Object.keys(data.js).forEach(function(handle) {
-                    const js = data.js[handle];
-                    html += '<tr>';
-                    html += '<td><code>' + handle + '</code></td>';
-                    html += '<td><span class="suple-badge">Group ' + js.group + '</span></td>';
-                    html += '<td><small>' + (js.src || 'N/A') + '</small></td>';
-                    html += '<td>' + (js.can_merge ? '✅' : '❌') + '</td>';
-                    html += '<td>' + (js.can_defer ? '✅' : '❌') + '</td>';
-                    html += '</tr>';
+
+            keys.sort();
+
+            let html = '<table class="suple-table">';
+            html += '<thead><tr>' +
+                '<th>' + (labels.handle || 'Handle') + '</th>' +
+                '<th>' + (labels.type || 'Type') + '</th>' +
+                '<th>' + (labels.detectedGroup || 'Detected group') + '</th>' +
+                '<th>' + (labels.manualGroup || 'Manual group') + '</th>' +
+                '<th>' + (labels.source || 'Source') + '</th>' +
+                '<th>' + (labels.canMerge || 'Can merge') + '</th>' +
+                '<th>' + (labels.canDefer || 'Can defer') + '</th>' +
+                '</tr></thead><tbody>';
+
+            keys.forEach(function(key) {
+                const row = rows[key];
+                const manualValue = manualGroups[key] || '';
+                const groupLabel = row.detectedGroup ? self.escapeHtml(groupPrefix + ' ' + row.detectedGroup) : '&mdash;';
+                const source = row.source ? '<small>' + self.escapeHtml(row.source) + '</small>' : '&mdash;';
+                let manualSelect = '<select class="suple-handle-group-select" data-handle="' + self.escapeHtml(row.handle) + '">';
+                manualSelect += '<option value="">' + (labels.auto || 'Automatic') + '</option>';
+
+                Object.keys(assetGroups).forEach(function(groupKey) {
+                    const isSelected = manualValue === groupKey ? ' selected' : '';
+                    const optionLabel = groupPrefix + ' ' + groupKey + (assetGroups[groupKey] ? ' · ' + assetGroups[groupKey] : '');
+                    manualSelect += '<option value="' + groupKey + '"' + isSelected + '>' + self.escapeHtml(optionLabel) + '</option>';
                 });
-                
-                html += '</tbody></table>';
-            }
-            
-            html += '</div>';
-            
+
+                manualSelect += '</select>';
+
+                html += '<tr>' +
+                    '<td><code>' + self.escapeHtml(row.handle) + '</code></td>' +
+                    '<td>' + self.escapeHtml(row.type) + '</td>' +
+                    '<td><span class="suple-badge">' + groupLabel + '</span></td>' +
+                    '<td>' + manualSelect + '</td>' +
+                    '<td>' + source + '</td>' +
+                    '<td>' + (row.canMerge === null ? '&mdash;' : (row.canMerge ? '✅' : '❌')) + '</td>' +
+                    '<td>' + (row.canDefer === null ? '&mdash;' : (row.canDefer ? '✅' : '❌')) + '</td>' +
+                    '</tr>';
+            });
+
+            html += '</tbody></table>';
+
             $container.html(html);
+
+            $('.suple-regenerate-bundles').prop('disabled', !this.needsRegeneration);
+        },
+
+        onManualGroupChange: function(e) {
+            const $select = $(e.currentTarget);
+            const handle = ($select.data('handle') || '').toString().toLowerCase();
+            const value = $select.val();
+
+            if (!handle) {
+                return;
+            }
+
+            if (value) {
+                this.manualAssetGroups[handle] = value;
+            } else {
+                delete this.manualAssetGroups[handle];
+            }
+
+            this.manualDirty = true;
+            this.needsRegeneration = false;
+            $('.suple-regenerate-bundles').prop('disabled', true);
+        },
+
+        saveManualGroups: function(e) {
+            e.preventDefault();
+
+            const $button = $(e.currentTarget);
+            const originalHtml = $button.html();
+            const manualGroups = {};
+            const self = this;
+
+            $('.suple-handle-group-select').each(function() {
+                const $select = $(this);
+                const handle = ($select.data('handle') || '').toString().toLowerCase();
+                const value = $select.val();
+
+                if (handle && value) {
+                    manualGroups[handle] = value;
+                }
+            });
+
+            $button.prop('disabled', true).html('<span class="suple-spinner"></span> ' + (supleSpeedAdmin.strings.processing || 'Processing...'));
+
+            SupleSpeedAdmin.ajaxRequest('save_manual_asset_groups', {
+                manual_groups: manualGroups
+            }, function(data) {
+                $button.prop('disabled', false).html(originalHtml);
+
+                self.manualAssetGroups = data.manual_groups || {};
+                self.manualDirty = false;
+                self.needsRegeneration = !!data.needs_regeneration;
+                self.updateBundleStatus(data.bundles || {});
+                self.renderManualGroupsTable();
+
+                if (self.needsRegeneration) {
+                    $('.suple-regenerate-bundles').prop('disabled', false);
+                }
+
+                SupleSpeedAdmin.showNotice('success', data.message || (supleSpeedAdmin.strings.success || 'Saved'));
+            }, function(error) {
+                $button.prop('disabled', false).html(originalHtml);
+                SupleSpeedAdmin.showNotice('error', error || supleSpeedAdmin.strings.error);
+            });
+        },
+
+        regenerateBundles: function(e) {
+            e.preventDefault();
+
+            const $button = $(e.currentTarget);
+            if ($button.is(':disabled')) {
+                return;
+            }
+
+            const originalHtml = $button.html();
+            const self = this;
+
+            $button.prop('disabled', true).html('<span class="suple-spinner"></span> ' + (supleSpeedAdmin.strings.processing || 'Processing...'));
+
+            SupleSpeedAdmin.ajaxRequest('regenerate_asset_bundles', {}, function(data) {
+                $button.html(originalHtml);
+                self.needsRegeneration = false;
+                self.updateBundleStatus(data.bundles || {});
+                SupleSpeedAdmin.showNotice('success', data.message || (supleSpeedAdmin.strings.success || 'Done'));
+            }, function(error) {
+                $button.prop('disabled', false).html(originalHtml);
+                SupleSpeedAdmin.showNotice('error', error || supleSpeedAdmin.strings.error);
+            });
+        },
+
+        updateBundleStatus: function(bundles) {
+            const $container = $('#bundle-status');
+            if ($container.length === 0) return;
+
+            const labels = supleSpeedAdmin.labels || {};
+            const self = this;
+            const groupPrefix = labels.groupPrefix || 'Group';
+
+            this.bundleStatus = bundles && typeof bundles === 'object' ? bundles : { css: {}, js: {} };
+
+            let hasBundles = false;
+            Object.keys(this.bundleStatus).forEach(function(type) {
+                const groups = self.bundleStatus[type];
+                if (groups && Object.keys(groups).length > 0) {
+                    const total = Object.values(groups).reduce(function(count, list) {
+                        return count + (Array.isArray(list) ? list.length : 0);
+                    }, 0);
+
+                    if (total > 0) {
+                        hasBundles = true;
+                    }
+                }
+            });
+
+            if (!hasBundles) {
+                $container.html('<p>' + (labels.noBundles || '') + '</p>');
+                return;
+            }
+
+            let html = '<table class="suple-table">';
+            html += '<thead><tr>' +
+                '<th>' + (labels.bundlesType || 'Type') + '</th>' +
+                '<th>' + (labels.bundlesGroup || 'Group') + '</th>' +
+                '<th>' + (labels.bundlesIdentifier || 'Identifier') + '</th>' +
+                '<th>' + (labels.bundlesVersion || 'Version') + '</th>' +
+                '<th>' + (labels.bundlesGenerated || 'Generated') + '</th>' +
+                '<th>' + (labels.bundlesHandles || 'Handles') + '</th>' +
+                '<th>' + (labels.bundlesSize || 'Size') + '</th>' +
+                '</tr></thead><tbody>';
+
+            ['css', 'js'].forEach(function(type) {
+                const groups = self.bundleStatus[type] || {};
+                Object.keys(groups).forEach(function(groupKey) {
+                    (groups[groupKey] || []).forEach(function(bundle) {
+                        const groupLabel = self.assetGroups[bundle.group] || '';
+                        const identifier = self.escapeHtml(bundle.identifier || '');
+                        const version = bundle.version || '';
+                        const created = bundle.created ? self.formatDate(bundle.created) : '';
+                        const handles = Array.isArray(bundle.handles) ? bundle.handles : [];
+                        const handlesCount = handles.length;
+                        const handlesHtml = handlesCount > 0 ? '<br><small>' + self.escapeHtml(handles.join(', ')) + '</small>' : '';
+
+                        html += '<tr>' +
+                            '<td>' + self.escapeHtml(type === 'css' ? (labels.css || 'CSS') : (labels.js || 'JS')) + '</td>' +
+                            '<td><span class="suple-badge">' + self.escapeHtml(groupPrefix + ' ' + bundle.group + (groupLabel ? ' · ' + groupLabel : '')) + '</span></td>' +
+                            '<td><code>' + identifier + '</code></td>' +
+                            '<td>' + version + '</td>' +
+                            '<td>' + self.escapeHtml(created) + '</td>' +
+                            '<td>' + handlesCount + handlesHtml + '</td>' +
+                            '<td>' + self.formatBytes(bundle.size || 0) + '</td>' +
+                            '</tr>';
+                    });
+                });
+            });
+
+            html += '</tbody></table>';
+
+            $container.html(html);
+        },
+
+        formatDate: function(timestamp) {
+            const date = new Date(parseInt(timestamp, 10) * 1000);
+
+            if (isNaN(date.getTime())) {
+                return '';
+            }
+
+            return date.toLocaleString();
+        },
+
+        formatBytes: function(bytes) {
+            let value = parseInt(bytes, 10);
+
+            if (!value) {
+                return '0 B';
+            }
+
+            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            let unitIndex = 0;
+
+            while (value >= 1024 && unitIndex < units.length - 1) {
+                value = value / 1024;
+                unitIndex++;
+            }
+
+            const precision = unitIndex === 0 ? 0 : 1;
+            return value.toFixed(precision) + ' ' + units[unitIndex];
+        },
+
+        escapeHtml: function(value) {
+            if (typeof value !== 'string') {
+                return value;
+            }
+
+            return value.replace(/[&<>"']/g, function(match) {
+                const entities = {
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#39;'
+                };
+
+                return entities[match] || match;
+            });
         },
 
         displayFontsResults: function(fonts, stats) {
