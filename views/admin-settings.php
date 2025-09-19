@@ -134,6 +134,8 @@ $current_settings = $this->get_current_settings();
                                min="1" max="168" class="suple-form-input">
                         <div class="suple-form-help">
                             <?php _e('How long to keep cached pages before regenerating them.', 'suple-speed'); ?>
+                            <br>
+                            <?php _e('When server rules cannot be written, Suple Speed will automatically apply Cache-Control, Expires and ETag headers to local static files using this lifetime as fallback.', 'suple-speed'); ?>
                         </div>
                     </div>
 
