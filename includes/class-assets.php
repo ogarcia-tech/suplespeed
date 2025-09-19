@@ -62,14 +62,15 @@ class Assets {
             add_action('wp_enqueue_scripts', [$this, 'optimize_scripts_styles'], 999);
             add_action('wp_head', [$this, 'inject_critical_css'], 0);
             add_action('wp_head', [$this, 'inject_preloads'], 2);
-            
+
             // Filtros para modificar output
             add_filter('style_loader_src', [$this, 'modify_css_src'], 10, 2);
             add_filter('script_loader_src', [$this, 'modify_js_src'], 10, 2);
         }
-        
+
         // AJAX para escanear handles
         add_action('wp_ajax_suple_speed_scan_handles', [$this, 'ajax_scan_handles']);
+        add_action('template_redirect', [$this, 'maybe_output_handles_capture'], 0);
     }
     
     /**
@@ -149,6 +150,10 @@ class Assets {
      * Verificar si se debe optimizar
      */
     private function should_optimize() {
+        if ($this->is_scan_capture_request()) {
+            return false;
+        }
+
         // Verificar configuración
         if (!$this->settings['assets_enabled']) {
             return false;
@@ -1359,51 +1364,236 @@ class Assets {
         }
         
         $handles_data = $this->scan_handles_from_url($url);
-        
+
+        if (is_wp_error($handles_data)) {
+            wp_send_json_error($handles_data->get_error_message());
+        }
+
         wp_send_json_success($handles_data);
     }
-    
+
     /**
      * Escanear handles desde URL específica
      */
     private function scan_handles_from_url($url) {
-        // TODO: Implementar escaneado de handles visitando la URL
-        // Por ahora devolver datos de ejemplo
-        
+        $target_url = add_query_arg('suple_speed_capture_handles', '1', $url);
+
+        $request_args = [
+            'timeout' => 20,
+            'redirection' => 5,
+            'user-agent' => 'SupleSpeed Assets Scanner',
+            'headers' => [
+                'Accept' => 'application/json'
+            ],
+            'cookies' => $this->get_internal_request_cookies()
+        ];
+
+        $request_args = apply_filters('suple_speed_scan_handles_request_args', $request_args, $target_url, $url);
+
+        $response = wp_remote_get($target_url, $request_args);
+
+        if (is_wp_error($response)) {
+            return $response;
+        }
+
+        $status_code = wp_remote_retrieve_response_code($response);
+
+        if ($status_code < 200 || $status_code >= 300) {
+            return new \WP_Error(
+                'suple_speed_scan_http_error',
+                sprintf(
+                    __('Unexpected response status: %d', 'suple-speed'),
+                    $status_code
+                )
+            );
+        }
+
+        $body = wp_remote_retrieve_body($response);
+
+        if (empty($body)) {
+            return new \WP_Error(
+                'suple_speed_scan_empty',
+                __('The scan request returned an empty response.', 'suple-speed')
+            );
+        }
+
+        $decoded = json_decode($body, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            return new \WP_Error(
+                'suple_speed_scan_invalid_json',
+                __('Unable to parse the assets scan response.', 'suple-speed')
+            );
+        }
+
+        if (isset($decoded['success'])) {
+            if (!$decoded['success']) {
+                $message = $decoded['data'] ?? __('Unable to fetch handles from the requested URL.', 'suple-speed');
+
+                if (is_array($message) && isset($message['message'])) {
+                    $message = $message['message'];
+                }
+
+                if (!is_string($message) || $message === '') {
+                    $message = __('Unable to fetch handles from the requested URL.', 'suple-speed');
+                }
+
+                return new \WP_Error('suple_speed_scan_failed', $message);
+            }
+
+            $decoded = $decoded['data'];
+        }
+
+        $css = isset($decoded['css']) && is_array($decoded['css']) ? $decoded['css'] : [];
+        $js = isset($decoded['js']) && is_array($decoded['js']) ? $decoded['js'] : [];
+
+        return [
+            'css' => $css,
+            'js' => $js
+        ];
+    }
+
+    /**
+     * Verificar si la petición actual es un escaneo de handles
+     */
+    private function is_scan_capture_request() {
+        return !empty($_GET['suple_speed_capture_handles']);
+    }
+
+    /**
+     * Capturar handles encolados cuando se solicita desde el frontend
+     */
+    public function maybe_output_handles_capture() {
+        if (!$this->is_scan_capture_request()) {
+            return;
+        }
+
         global $wp_scripts, $wp_styles;
-        
+
+        $wp_styles = wp_styles();
+        $wp_scripts = wp_scripts();
+
         $handles_data = [
             'css' => [],
             'js' => []
         ];
-        
-        // Obtener handles CSS registrados
-        foreach ($wp_styles->registered as $handle => $data) {
-            $handles_data['css'][$handle] = [
-                'handle' => $handle,
-                'src' => $data->src,
-                'deps' => $data->deps,
-                'ver' => $data->ver,
-                'group' => $this->classify_handle($handle, $data->src),
-                'manual_group' => $this->get_manual_group_for_handle($handle),
-                'can_merge' => $this->can_merge_handle($handle)
-            ];
+
+        if ($wp_styles instanceof \WP_Styles) {
+            $css_queue = array_unique(array_merge($wp_styles->queue, $wp_styles->done));
+
+            foreach ($css_queue as $handle) {
+                if (empty($handle) || !isset($wp_styles->registered[$handle])) {
+                    continue;
+                }
+
+                if (in_array($handle, $this->excluded_handles, true)) {
+                    continue;
+                }
+
+                $data = $wp_styles->registered[$handle];
+                $src = $this->normalize_asset_src($data->src ?? '', 'css');
+
+                $handles_data['css'][$handle] = [
+                    'handle' => $handle,
+                    'src' => $src,
+                    'deps' => array_values($data->deps ?? []),
+                    'ver' => $data->ver,
+                    'group' => $this->classify_handle($handle, $src),
+                    'manual_group' => $this->get_manual_group_for_handle($handle),
+                    'can_merge' => $this->can_merge_handle($handle)
+                ];
+            }
         }
 
-        // Obtener handles JS registrados
-        foreach ($wp_scripts->registered as $handle => $data) {
-            $handles_data['js'][$handle] = [
-                'handle' => $handle,
-                'src' => $data->src,
-                'deps' => $data->deps,
-                'ver' => $data->ver,
-                'group' => $this->classify_handle($handle, $data->src),
-                'manual_group' => $this->get_manual_group_for_handle($handle),
-                'can_merge' => $this->can_merge_handle($handle),
-                'can_defer' => $this->can_defer_handle($handle)
-            ];
+        if ($wp_scripts instanceof \WP_Scripts) {
+            $js_queue = array_unique(array_merge($wp_scripts->queue, $wp_scripts->done));
+
+            foreach ($js_queue as $handle) {
+                if (empty($handle) || !isset($wp_scripts->registered[$handle])) {
+                    continue;
+                }
+
+                if (in_array($handle, $this->excluded_handles, true)) {
+                    continue;
+                }
+
+                $data = $wp_scripts->registered[$handle];
+                $src = $this->normalize_asset_src($data->src ?? '', 'js');
+
+                $handles_data['js'][$handle] = [
+                    'handle' => $handle,
+                    'src' => $src,
+                    'deps' => array_values($data->deps ?? []),
+                    'ver' => $data->ver,
+                    'group' => $this->classify_handle($handle, $src),
+                    'manual_group' => $this->get_manual_group_for_handle($handle),
+                    'can_merge' => $this->can_merge_handle($handle),
+                    'can_defer' => $this->can_defer_handle($handle)
+                ];
+            }
         }
-        
-        return $handles_data;
+
+        $handles_data = apply_filters('suple_speed_scan_handles_data', $handles_data, $this->get_current_url());
+
+        nocache_headers();
+
+        wp_send_json_success($handles_data);
+    }
+
+    /**
+     * Normalizar la URL de un asset
+     */
+    private function normalize_asset_src($src, $type) {
+        if (empty($src)) {
+            return '';
+        }
+
+        if (strpos($src, '//') === 0) {
+            return (is_ssl() ? 'https:' : 'http:') . $src;
+        }
+
+        if (preg_match('#^https?://#i', $src)) {
+            return $src;
+        }
+
+        if (strpos($src, '/') === 0) {
+            return home_url($src);
+        }
+
+        global $wp_scripts, $wp_styles;
+
+        if ($type === 'css' && $wp_styles instanceof \WP_Styles && !empty($wp_styles->base_url)) {
+            return trailingslashit($wp_styles->base_url) . ltrim($src, '/');
+        }
+
+        if ($type === 'js' && $wp_scripts instanceof \WP_Scripts && !empty($wp_scripts->base_url)) {
+            return trailingslashit($wp_scripts->base_url) . ltrim($src, '/');
+        }
+
+        return $src;
+    }
+
+    /**
+     * Obtener cookies actuales para enviarlas en la petición interna
+     */
+    private function get_internal_request_cookies() {
+        if (empty($_COOKIE) || !is_array($_COOKIE)) {
+            return [];
+        }
+
+        $cookies = [];
+
+        foreach ($_COOKIE as $name => $value) {
+            if (!is_scalar($value)) {
+                continue;
+            }
+
+            $cookies[] = new \WP_Http_Cookie([
+                'name' => $name,
+                'value' => wp_unslash($value)
+            ]);
+        }
+
+        return $cookies;
     }
 }

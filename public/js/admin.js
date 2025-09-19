@@ -199,21 +199,59 @@
                 type: 'POST',
                 data: data,
                 success: function(response) {
-                    if (response.success) {
+                    if (response && response.success) {
                         if (successCallback) successCallback(response.data);
+                        return;
+                    }
+
+                    let message = response && typeof response.data !== 'undefined'
+                        ? response.data
+                        : null;
+
+                    if (message && typeof message === 'object' && message.message) {
+                        message = message.message;
+                    }
+
+                    if (typeof message !== 'string' || message === '') {
+                        message = (supleSpeedAdmin.strings && supleSpeedAdmin.strings.error) || 'An error occurred';
+                    }
+
+                    if (errorCallback) {
+                        errorCallback(message);
                     } else {
-                        if (errorCallback) {
-                            errorCallback(response.data);
-                        } else {
-                            SupleSpeedAdmin.showNotice('error', response.data || supleSpeedAdmin.strings.error);
-                        }
+                        SupleSpeedAdmin.showNotice('error', message);
                     }
                 },
-                error: function(xhr, status, error) {
+                error: function(xhr) {
+                    let message = null;
+
+                    if (xhr && xhr.responseJSON && typeof xhr.responseJSON.data !== 'undefined') {
+                        if (typeof xhr.responseJSON.data === 'string') {
+                            message = xhr.responseJSON.data;
+                        } else if (xhr.responseJSON.data && xhr.responseJSON.data.message) {
+                            message = xhr.responseJSON.data.message;
+                        }
+                    } else if (xhr && xhr.responseText) {
+                        try {
+                            const parsed = JSON.parse(xhr.responseText);
+                            if (parsed && typeof parsed.data !== 'undefined') {
+                                if (typeof parsed.data === 'string') {
+                                    message = parsed.data;
+                                } else if (parsed.data && parsed.data.message) {
+                                    message = parsed.data.message;
+                                }
+                            }
+                        } catch (e) {}
+                    }
+
+                    if (typeof message !== 'string' || message === '') {
+                        message = (supleSpeedAdmin.strings && supleSpeedAdmin.strings.error) || 'An error occurred';
+                    }
+
                     if (errorCallback) {
-                        errorCallback(error);
+                        errorCallback(message);
                     } else {
-                        SupleSpeedAdmin.showNotice('error', supleSpeedAdmin.strings.error);
+                        SupleSpeedAdmin.showNotice('error', message);
                     }
                 }
             });
@@ -283,26 +321,48 @@
 
         scanHandles: function(e) {
             e.preventDefault();
-            
+
             const $button = $(this);
             const originalText = $button.text();
             const scanUrl = $button.data('scan-url') || window.location.origin;
-            
+            const $results = $('#handles-detected');
+            const scanningText = (supleSpeedAdmin.strings && supleSpeedAdmin.strings.scanningHandles) || 'Scanning handles...';
+
             $button.html('<span class="suple-spinner"></span> ' + supleSpeedAdmin.strings.processing);
             $button.prop('disabled', true);
-            
+
+            if ($results.length) {
+                $results.addClass('suple-loading');
+                $results.html('<p class="suple-muted"><span class="suple-spinner"></span> ' + SupleSpeedAdmin.escapeHtml(scanningText) + '</p>');
+            }
+
             SupleSpeedAdmin.ajaxRequest('scan_handles', {
                 scan_url: scanUrl
             }, function(data) {
                 $button.text(originalText);
                 $button.prop('disabled', false);
-                
+
+                if ($results.length) {
+                    $results.removeClass('suple-loading');
+                }
+
                 // Mostrar resultados de handles
                 SupleSpeedAdmin.displayHandlesResults(data);
             }, function(error) {
                 $button.text(originalText);
                 $button.prop('disabled', false);
-                SupleSpeedAdmin.showNotice('error', error);
+
+                const fallbackError = (supleSpeedAdmin.strings && supleSpeedAdmin.strings.scanHandlesError)
+                    || (supleSpeedAdmin.strings && supleSpeedAdmin.strings.error)
+                    || 'An error occurred';
+                const message = (typeof error === 'string' && error) ? error : fallbackError;
+
+                if ($results.length) {
+                    $results.removeClass('suple-loading');
+                    $results.html('<p class="suple-error">' + SupleSpeedAdmin.escapeHtml(message) + '</p>');
+                }
+
+                SupleSpeedAdmin.showNotice('error', message);
             });
         },
 
@@ -661,6 +721,7 @@
 
             const $detected = $('#handles-detected');
             if ($detected.length) {
+                $detected.removeClass('suple-loading');
                 let html = '';
                 const labels = supleSpeedAdmin.labels || {};
                 const groupPrefix = labels.groupPrefix || 'Group';
@@ -719,7 +780,8 @@
                 }
 
                 if (!html) {
-                    html = '<p>' + (labels.scanPlaceholder || '') + '</p>';
+                    const emptyMessage = labels.noHandlesDetected || labels.noHandles || 'No handles detected yet.';
+                    html = '<p class="suple-muted">' + self.escapeHtml(emptyMessage) + '</p>';
                 }
 
                 $detected.html(html);
