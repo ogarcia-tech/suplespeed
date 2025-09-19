@@ -9,7 +9,6 @@
         init: function() {
             this.bindEvents();
             this.initComponents();
-            this.setupTabs();
             this.setupToggles();
             this.setupAjaxForms();
             this.initializeAssetsUI();
@@ -92,56 +91,6 @@
 
             // Inicializar guía rápida
             this.initOnboarding();
-        },
-
-        setupTabs: function() {
-            const $tabNav = $('.suple-tab-nav');
-            if ($tabNav.length === 0) {
-                return;
-            }
-
-            const openTab = function(targetTab) {
-                if (!targetTab || targetTab.charAt(0) !== '#') {
-                    return;
-                }
-
-                const $target = $(targetTab);
-                if ($target.length === 0) {
-                    return;
-                }
-
-                $tabNav.find('a').removeClass('active');
-                $tabNav.find('a[href="' + targetTab + '"]').addClass('active');
-
-                $('.suple-tab-content').removeClass('active');
-                $target.addClass('active');
-            };
-
-            $tabNav.on('click', 'a', function(e) {
-                e.preventDefault();
-
-                const targetTab = $(this).attr('href');
-                openTab(targetTab);
-
-                if (history.replaceState) {
-                    const baseUrl = window.location.href.split('#')[0];
-                    history.replaceState(null, '', baseUrl + targetTab);
-                } else {
-                    window.location.hash = targetTab;
-                }
-            });
-
-            const initialHash = window.location.hash;
-            if (initialHash && $(initialHash).hasClass('suple-tab-content')) {
-                openTab(initialHash);
-            }
-
-            $(window).on('hashchange', function() {
-                const newHash = window.location.hash;
-                if (newHash && $(newHash).hasClass('suple-tab-content')) {
-                    openTab(newHash);
-                }
-            });
         },
 
         setupToggles: function() {
