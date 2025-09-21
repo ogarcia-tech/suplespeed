@@ -763,7 +763,7 @@ class Admin {
             $font_preloads = $fonts_module->get_font_preloads();
         }
 
-        include SUPLE_SPEED_PLUGIN_DIR . 'views/admin-dashboard.php';
+        include SUPLE_SPEED_PLUGIN_DIR . 'views/admin-dashboard-new.php';
     }
 
     /**
