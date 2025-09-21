@@ -1,0 +1,119 @@
+/**
+ * Suple Speed - Nuevos Estilos del Dashboard
+ */
+
+:root {
+    --suple-bg: #f0f0f1;
+    --suple-card-bg: #ffffff;
+    --suple-text-main: #1d2327;
+    --suple-text-secondary: #50575e;
+    --suple-primary: #2271b1;
+    --suple-accent: #00a32a;
+    --suple-warn: #f5b400;
+    --suple-border: #dcdcde;
+    --suple-radius: 8px;
+    --suple-shadow: 0 4px 10px rgba(0,0,0,0.05);
+}
+
+.suple-new-dashboard {
+    background-color: var(--suple-bg);
+    padding: 24px;
+    margin-left: -20px; /* Compensa el padding de wp-admin */
+}
+
+/* Cabecera */
+.suple-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 32px;
+}
+.suple-header-main h1 {
+    font-size: 24px;
+    margin: 0;
+    color: var(--suple-text-main);
+}
+.suple-version-tag {
+    font-size: 12px;
+    font-weight: 600;
+    background-color: var(--suple-border);
+    color: var(--suple-text-secondary);
+    padding: 4px 8px;
+    border-radius: 12px;
+    vertical-align: middle;
+}
+.suple-header-status {
+    font-weight: 600;
+    margin-top: 4px;
+}
+.suple-status-ok { color: var(--suple-accent); }
+.suple-status-warn { color: var(--suple-warn); }
+
+/* Secciones */
+.suple-section h2 {
+    font-size: 18px;
+    margin-bottom: 16px;
+    color: var(--suple-text-secondary);
+}
+
+/* Grid y Tarjetas */
+.suple-grid-4 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 24px;
+}
+.suple-card {
+    background: var(--suple-card-bg);
+    border-radius: var(--suple-radius);
+    padding: 24px;
+    box-shadow: var(--suple-shadow);
+    border: 1px solid var(--suple-border);
+}
+.suple-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+.suple-card-header .dashicons {
+    color: var(--suple-primary);
+}
+.suple-card-header h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--suple-text-main);
+}
+.suple-card-highlight {
+    background: var(--suple-primary);
+    color: white;
+}
+.suple-card-highlight .suple-card-header .dashicons,
+.suple-card-highlight .suple-card-header h3 {
+    color: white;
+}
+
+/* Métricas */
+.suple-score-meter { text-align: center; }
+.suple-score-value { font-size: 48px; font-weight: 700; }
+.suple-metric-main { font-size: 32px; font-weight: 600; color: var(--suple-text-main); }
+.suple-metric-label { font-size: 14px; color: var(--suple-text-secondary); }
+.suple-metric-sub { font-size: 12px; color: #949494; margin-top: 4px;}
+
+/* Recomendaciones */
+.suple-recommendations { display: flex; flex-direction: column; gap: 16px; }
+.suple-rec-item {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px;
+    background: var(--suple-card-bg);
+    border-left: 4px solid;
+    border-radius: var(--suple-radius);
+    box-shadow: var(--suple-shadow);
+}
+.suple-rec-warn { border-color: var(--suple-warn); }
+.suple-rec-info { border-color: var(--suple-primary); }
+.suple-rec-item .dashicons { font-size: 24px; }
+.suple-rec-text { flex-grow: 1; }
+.suple-rec-text strong { color: var(--suple-text-main); }
