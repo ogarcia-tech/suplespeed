@@ -15,6 +15,7 @@ class Cache {
     private $logger;
     private $cdn;
     private $last_cdn_results = [];
+    private $purging_in_progress = false; // <-- AÑADIDO: Indicador para evitar purgas duplicadas
     private $static_resource_prefixes = [
         '/wp-content/uploads/',
         '/wp-content/cache/',
@@ -677,6 +678,11 @@ class Cache {
      * Purgar toda la caché
      */
     public function purge_all() {
+        if ($this->purging_in_progress) {
+            return 0; // Evitar purga duplicada
+        }
+        $this->purging_in_progress = true;
+
         $files_deleted = 0;
 
         if (is_dir($this->cache_dir)) {
@@ -703,6 +709,7 @@ class Cache {
             ], 'cache');
         }
         
+        $this->purging_in_progress = false; // Liberar el bloqueo
         return $files_deleted;
     }
     
@@ -710,8 +717,14 @@ class Cache {
      * Purgar caché de un post específico
      */
     public function purge_post_cache($post_id) {
+        if ($this->purging_in_progress) {
+            return false; // Evitar purga duplicada
+        }
+        $this->purging_in_progress = true;
+        
         $post = get_post($post_id);
         if (!$post) {
+            $this->purging_in_progress = false;
             return false;
         }
         
@@ -755,7 +768,7 @@ class Cache {
         // Purgar URLs
         $purged_count = $this->purge_urls($urls_to_purge);
         
-        // Log de purga
+           // Log de purga
         if ($this->logger) {
             $this->logger->info('Post cache purged', [
                 'post_id' => $post_id,
@@ -765,6 +778,7 @@ class Cache {
             ], 'cache');
         }
         
+        $this->purging_in_progress = false; // Liberar el bloqueo
         return $purged_count;
     }
     
