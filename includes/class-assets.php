@@ -6,49 +6,7 @@ namespace SupleSpeed;
  * Optimización de assets (CSS/JS)
  */
 class Assets {
-    /**
-     * Inyectar Critical CSS y cargar el resto de forma asíncrona.
-     */
-    public function inject_critical_css() {
-        if (!$this->settings['critical_css_enabled']) {
-            return;
-        }
-        
-        $critical_css = $this->get_critical_css();
-        
-        if (!empty($critical_css)) {
-            echo '<style id="suple-speed-critical-css">';
-            echo $this->minify_css($critical_css); // Minificar el CSS crítico
-            echo '</style>';
-            
-            // Ahora, instruimos para que los demás CSS se carguen sin bloquear
-            add_filter('style_loader_tag', [$this, 'defer_stylesheet_load'], 999, 2);
-        }
-    }
     
-    /**
-     * Modifica la etiqueta <link> de los CSS para que carguen de forma asíncrona.
-     * Se excluyen los handles que no queremos tocar (ej. los del modo editor).
-     */
-    public function defer_stylesheet_load($tag, $handle) {
-        // No diferir si es un handle excluido o en modo test para admin
-        if (in_array($handle, $this->excluded_handles) || (is_user_logged_in() && ($this->settings['assets_test_mode'] ?? false))) {
-            return $tag;
-        }
-    
-        // Convertir a carga asíncrona
-        $preload_tag = str_replace(
-            "rel='stylesheet'",
-            "rel='preload' as='style' onload=\"this.onload=null;this.rel='stylesheet'\"",
-            $tag
-        );
-        
-        // Añadir un fallback para navegadores que no soportan JS
-        $noscript_tag = '<noscript>' . $tag . '</noscript>';
-    
-        return $preload_tag . $noscript_tag;
-    }
-
     /**
      * Configuración
      */
@@ -1872,10 +1830,10 @@ class Assets {
     // === CRITICAL CSS Y PRELOADS ===
     
     /**
-     * Inyectar Critical CSS
+     * Inyectar Critical CSS y cargar el resto de forma asíncrona.
      */
     public function inject_critical_css() {
-        if (!$this->settings['critical_css_enabled']) {
+        if (!($this->settings['critical_css_enabled'] ?? false)) {
             return;
         }
         
@@ -1883,11 +1841,37 @@ class Assets {
         
         if (!empty($critical_css)) {
             echo '<style id="suple-speed-critical-css">';
-            echo $critical_css;
+            echo $this->minify_css($critical_css); // Minificar el CSS crítico
             echo '</style>';
-            echo "\n";
+            
+            // Ahora, instruimos para que los demás CSS se carguen sin bloquear
+            add_filter('style_loader_tag', [$this, 'defer_stylesheet_load'], 999, 2);
         }
     }
+
+    /**
+     * Modifica la etiqueta <link> de los CSS para que carguen de forma asíncrona.
+     */
+    public function defer_stylesheet_load($tag, $handle) {
+        // No diferir handles críticos o excluidos
+        $critical_handles = apply_filters('suple_speed_critical_css_handles', []);
+        if (in_array($handle, $this->excluded_handles) || in_array($handle, $critical_handles)) {
+            return $tag;
+        }
+
+        // Convertir a carga asíncrona
+        $preload_tag = str_replace(
+            "rel='stylesheet'",
+            "rel='preload' as='style' onload=\"this.onload=null;this.rel='stylesheet'\"",
+            $tag
+        );
+        
+        // Añadir un fallback para navegadores que no soportan JS
+        $noscript_tag = '<noscript>' . $tag . '</noscript>';
+
+        return $preload_tag . "\n" . $noscript_tag;
+    }
+
     
     /**
      * Obtener Critical CSS
