@@ -6,7 +6,19 @@ namespace SupleSpeed;
  * Comandos WP-CLI para Suple Speed
  */
 class WP_CLI {
-    
+    foreach ($urls as $url) {
+        wp_remote_get($url, [
+            'timeout' => 30,
+            'blocking' => false, // No esperar la respuesta para agilizar el proceso
+            'headers' => [
+                'User-Agent' => 'Suple Speed Cache Warmer'
+            ]
+        ]);
+        $progress->tick();
+        if ($delay > 0) {
+            sleep($delay);
+        }
+    }
     public function __construct() {
         if (defined('WP_CLI') && WP_CLI) {
             add_action('init', [$this, 'register_commands']);
