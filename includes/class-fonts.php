@@ -1,7 +1,27 @@
 <?php
 
 namespace SupleSpeed;
+/**
+ * Detectar fuentes críticas automáticamente
+ */
+private function detect_critical_fonts() {
+    // Implementación básica para detectar fuentes en el LCP o en elementos hero
+    // Esto es un ejemplo y debería ser expandido.
+    $critical_fonts = [];
+    $lcp_element_font = get_option('suple_speed_lcp_font_url'); // Asumimos que guardas la fuente del LCP
 
+    if ($lcp_element_font) {
+        $critical_fonts[] = [
+            'rel' => 'preload',
+            'href' => $lcp_element_font,
+            'as' => 'font',
+            'type' => 'font/woff2',
+            'crossorigin' => 'anonymous'
+        ];
+    }
+
+    return $critical_fonts;
+}
 /**
  * Localización y optimización de Google Fonts
  */
