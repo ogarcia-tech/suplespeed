@@ -6,100 +6,7 @@ namespace SupleSpeed;
  * Optimización de imágenes (lazy loading, WebP, LQIP)
  */
 class Images {
-    /**
-     * Procesar imagen individual con lógica avanzada para WebP y Srcset.
-     */
-    private function process_single_image($matches) {
-        $img_tag_html = $matches[0];
-        $attributes_string = $matches[1];
-        
-        $attributes = $this->parse_img_attributes($attributes_string);
     
-        if (empty($attributes['src'])) {
-            return $img_tag_html; // No procesar si no hay src
-        }
-    
-        // Obtener el ID del adjunto desde el src o las clases
-        $attachment_id = attachment_url_to_postid($attributes['src']);
-        if (!$attachment_id && !empty($attributes['class'])) {
-            if (preg_match('/wp-image-(\d+)/', $attributes['class'], $class_matches)) {
-                $attachment_id = (int) $class_matches[1];
-            }
-        }
-        
-        // No procesar si es una imagen crítica (ya se le dará preload)
-        if ($this->is_critical_image_by_attributes($attributes_string)) {
-            $attributes['loading'] = 'eager';
-            return $this->build_img_tag($attributes);
-        }
-        
-        // Aplicar lazy loading por defecto
-        $attributes['loading'] = 'lazy';
-        
-        // Si no tenemos un ID de adjunto, no podemos generar srcset ni WebP, devolvemos la imagen con lazy loading.
-        if (!$attachment_id) {
-            return $this->build_img_tag($attributes);
-        }
-    
-        // Generar srcset para la imagen original
-        $srcset = wp_get_attachment_image_srcset($attachment_id, 'full');
-        if ($srcset) {
-            $attributes['srcset'] = $srcset;
-            $sizes = wp_get_attachment_image_sizes($attachment_id, 'full');
-            if ($sizes) {
-                $attributes['sizes'] = $sizes;
-            }
-        }
-    
-        // Comprobar si existe la versión WebP
-        $webp_srcset = $this->get_webp_srcset($attachment_id);
-    
-        // Si tenemos una versión WebP, creamos la etiqueta <picture>
-        if ($webp_srcset) {
-            $picture_tag = '<picture>';
-            $picture_tag .= '<source type="image/webp" srcset="' . esc_attr($webp_srcset) . '" sizes="' . esc_attr($attributes['sizes'] ?? '') . '">';
-            $picture_tag .= $this->build_img_tag($attributes); // El <img> original como fallback
-            $picture_tag .= '</picture>';
-            return $picture_tag;
-        }
-    
-        // Si no, devolvemos la etiqueta <img> con srcset
-        return $this->build_img_tag($attributes);
-    }
-    
-    /**
-     * Obtiene el srcset para la versión WebP de una imagen si existe.
-     */
-    private function get_webp_srcset($attachment_id) {
-        $metadata = wp_get_attachment_metadata($attachment_id);
-        if (!isset($metadata['file'])) {
-            return false;
-        }
-    
-        $upload_dir = wp_get_upload_dir();
-        $webp_srcset = '';
-        $image_urls = [];
-    
-        // Comprobar el archivo principal
-        $base_path = $upload_dir['basedir'] . '/' . dirname($metadata['file']) . '/';
-        $original_filename = basename($metadata['file']);
-        $webp_filename = pathinfo($original_filename, PATHINFO_FILENAME) . '.webp';
-        if (file_exists($base_path . $webp_filename)) {
-            $image_urls[] = $upload_dir['baseurl'] . '/' . dirname($metadata['file']) . '/' . $webp_filename . ' ' . $metadata['width'] . 'w';
-        }
-    
-        // Comprobar los tamaños intermedios
-        if (isset($metadata['sizes'])) {
-            foreach ($metadata['sizes'] as $size => $size_data) {
-                $webp_filename = pathinfo($size_data['file'], PATHINFO_FILENAME) . '.webp';
-                if (file_exists($base_path . $webp_filename)) {
-                    $image_urls[] = $upload_dir['baseurl'] . '/' . dirname($metadata['file']) . '/' . $webp_filename . ' ' . $size_data['width'] . 'w';
-                }
-            }
-        }
-    
-        return implode(', ', $image_urls);
-    }
     /**
      * Configuración
      */
@@ -172,7 +79,7 @@ class Images {
      * Inicializar hooks
      */
     private function init_hooks() {
-        if (!is_admin() && $this->settings['images_lazy']) {
+        if (!is_admin() && ($this->settings['images_lazy'] ?? false)) {
             // Lazy loading (respetando el nativo de WordPress)
             add_filter('wp_get_attachment_image_attributes', [$this, 'add_lazy_loading'], 10, 3);
             add_filter('the_content', [$this, 'add_lazy_loading_to_content']);
@@ -183,12 +90,12 @@ class Images {
         }
         
         // WebP/AVIF rewriting si está habilitado
-        if ($this->settings['images_webp_rewrite']) {
+        if ($this->settings['images_webp_rewrite'] ?? false) {
             add_filter('suple_speed_process_html', [$this, 'rewrite_images_to_webp']);
         }
         
         // LQIP (Low Quality Image Placeholders)
-        if ($this->settings['images_lqip']) {
+        if ($this->settings['images_lqip'] ?? false) {
             add_filter('suple_speed_process_html', [$this, 'add_lqip_placeholders']);
         }
         
@@ -692,32 +599,98 @@ class Images {
     }
     
     /**
-     * Procesar imagen individual
+     * Procesar imagen individual con lógica avanzada para WebP y Srcset.
      */
     private function process_single_image($matches) {
-        $img_tag = $matches[0];
-        $attributes = $matches[1];
+        $img_tag_html = $matches[0];
+        $attributes_string = $matches[1];
         
-        // Parsear atributos
-        $parsed_attrs = $this->parse_img_attributes($attributes);
-        
-        // Aplicar lazy loading si no está presente
-        if (!isset($parsed_attrs['loading']) && 
-            !$this->is_critical_image_by_attributes($attributes)) {
-            $parsed_attrs['loading'] = 'lazy';
+        $attributes = $this->parse_img_attributes($attributes_string);
+
+        if (empty($attributes['src'])) {
+            return $img_tag_html; // No procesar si no hay src
         }
-        
-        // Añadir dimensiones si faltan y son detectables
-        if (!isset($parsed_attrs['width']) || !isset($parsed_attrs['height'])) {
-            $dimensions = $this->detect_image_dimensions($parsed_attrs['src'] ?? '');
-            if ($dimensions) {
-                $parsed_attrs['width'] = $parsed_attrs['width'] ?? $dimensions['width'];
-                $parsed_attrs['height'] = $parsed_attrs['height'] ?? $dimensions['height'];
+
+        // Obtener el ID del adjunto desde el src o las clases
+        $attachment_id = attachment_url_to_postid($attributes['src']);
+        if (!$attachment_id && !empty($attributes['class'])) {
+            if (preg_match('/wp-image-(\d+)/', $attributes['class'], $class_matches)) {
+                $attachment_id = (int) $class_matches[1];
             }
         }
         
-        // Reconstruir tag
-        return $this->build_img_tag($parsed_attrs);
+        // No procesar si es una imagen crítica (ya se le dará preload)
+        if ($this->is_critical_image_by_attributes($attributes_string)) {
+            $attributes['loading'] = 'eager';
+            return $this->build_img_tag($attributes);
+        }
+        
+        // Aplicar lazy loading por defecto
+        $attributes['loading'] = 'lazy';
+        
+        // Si no tenemos un ID de adjunto, no podemos generar srcset ni WebP, devolvemos la imagen con lazy loading.
+        if (!$attachment_id) {
+            return $this->build_img_tag($attributes);
+        }
+
+        // Generar srcset para la imagen original
+        $srcset = wp_get_attachment_image_srcset($attachment_id, 'full');
+        if ($srcset) {
+            $attributes['srcset'] = $srcset;
+            $sizes = wp_get_attachment_image_sizes($attachment_id, 'full');
+            if ($sizes) {
+                $attributes['sizes'] = $sizes;
+            }
+        }
+
+        // Comprobar si existe la versión WebP
+        $webp_srcset = $this->get_webp_srcset($attachment_id);
+
+        // Si tenemos una versión WebP, creamos la etiqueta <picture>
+        if ($webp_srcset) {
+            $picture_tag = '<picture>';
+            $picture_tag .= '<source type="image/webp" srcset="' . esc_attr($webp_srcset) . '" sizes="' . esc_attr($attributes['sizes'] ?? '') . '">';
+            $picture_tag .= $this->build_img_tag($attributes); // El <img> original como fallback
+            $picture_tag .= '</picture>';
+            return $picture_tag;
+        }
+
+        // Si no, devolvemos la etiqueta <img> con srcset
+        return $this->build_img_tag($attributes);
+    }
+    
+    /**
+     * Obtiene el srcset para la versión WebP de una imagen si existe.
+     */
+    private function get_webp_srcset($attachment_id) {
+        $metadata = wp_get_attachment_metadata($attachment_id);
+        if (!isset($metadata['file'])) {
+            return false;
+        }
+
+        $upload_dir = wp_get_upload_dir();
+        $webp_srcset = '';
+        $image_urls = [];
+
+        // Comprobar el archivo principal
+        $base_path = $upload_dir['basedir'] . '/' . dirname($metadata['file']) . '/';
+        $original_filename = basename($metadata['file']);
+        $webp_filename = pathinfo($original_filename, PATHINFO_FILENAME) . '.webp';
+        if (file_exists($base_path . $webp_filename)) {
+            $image_urls[] = $upload_dir['baseurl'] . '/' . dirname($metadata['file']) . '/' . $webp_filename . ' ' . $metadata['width'] . 'w';
+        }
+
+        // Comprobar los tamaños intermedios
+        if (isset($metadata['sizes'])) {
+            foreach ($metadata['sizes'] as $size => $size_data) {
+                $webp_filename = pathinfo($size_data['file'], PATHINFO_FILENAME) . '.webp';
+                if (file_exists($base_path . $webp_filename)) {
+                    $image_urls[] = $upload_dir['baseurl'] . '/' . dirname($metadata['file']) . '/' . $webp_filename . ' ' . $size_data['width'] . 'w';
+                }
+            }
+        }
+
+        return implode(', ', $image_urls);
     }
     
     /**
@@ -917,7 +890,7 @@ class Images {
      * Añadir placeholders LQIP
      */
     public function add_lqip_placeholders($html) {
-        if (!$this->settings['images_lqip']) {
+        if (!($this->settings['images_lqip'] ?? false)) {
             return $html;
         }
         
