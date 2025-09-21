@@ -482,7 +482,7 @@ class Admin {
         // CSS
          wp_enqueue_style(
             'suple-speed-admin-new',
-            SUPLE_SPEED_PLUGIN_URL . 'public/css/admin-new.css',
+            SUPLE_SPEED_PLUGIN_URL . 'public/css/admin.css',
             [],
             $version
         );
