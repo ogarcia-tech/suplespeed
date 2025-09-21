@@ -480,9 +480,9 @@ class Admin {
         $version = SUPLE_SPEED_VERSION;
         
         // CSS
-        wp_enqueue_style(
-            'suple-speed-admin',
-            SUPLE_SPEED_PLUGIN_URL . 'public/css/admin.css',
+         wp_enqueue_style(
+            'suple-speed-admin-new',
+            SUPLE_SPEED_PLUGIN_URL . 'public/css/admin-new.css',
             [],
             $version
         );
